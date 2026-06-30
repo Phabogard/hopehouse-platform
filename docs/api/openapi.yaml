@@ -1,0 +1,88 @@
+openapi: 3.1.0
+info:
+  title: Hope House ERP API
+  version: 0.1.0
+  description: Contrat API initial du MVP Hope House ERP.
+paths:
+  /health:
+    get:
+      summary: Vérifie l'état de l'API.
+      responses:
+        '200':
+          description: API opérationnelle.
+  /users:
+    get:
+      summary: Liste les utilisateurs.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Liste des utilisateurs.
+  /beneficiaries:
+    get:
+      summary: Liste les bénéficiaires.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Liste des bénéficiaires.
+    post:
+      summary: Crée un bénéficiaire.
+      security:
+        - bearerAuth: []
+      responses:
+        '201':
+          description: Bénéficiaire créé.
+  /services:
+    get:
+      summary: Liste les services.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Liste des services.
+  /subscriptions:
+    get:
+      summary: Liste les abonnements.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Liste des abonnements.
+  /payments:
+    get:
+      summary: Liste les paiements.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Liste des paiements.
+    post:
+      summary: Crée un paiement.
+      security:
+        - bearerAuth: []
+      responses:
+        '201':
+          description: Paiement créé.
+  /invoices:
+    get:
+      summary: Liste les factures.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Liste des factures.
+  /audit-logs:
+    get:
+      summary: Liste les traces d'audit.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Liste des traces d'audit.
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
