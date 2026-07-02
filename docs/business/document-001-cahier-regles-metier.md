@@ -90,3 +90,63 @@ Statut : validé avec réserves mineures.
 - Connecteurs externes.
 - Règles comptables détaillées.
 - Obligations légales et fiscales applicables.
+
+
+## Vision fonctionnelle cible validée
+
+La plateforme ne doit jamais être construite pour un seul service. Elle doit devenir un moteur de commandes universel capable de gérer les unités Airtel, Orange, Vodacom et Africell, les forfaits Internet/SMS/Voix, l'électricité, les fournisseurs TV, les accessoires et tous futurs services sans modification du code.
+
+### Cycle obligatoire
+
+Chaque service suit le même cycle :
+
+1. Création.
+2. Validation.
+3. Exécution.
+4. Notification.
+5. Reçu.
+6. Historique.
+7. Audit.
+
+Le moteur lit la configuration et ne contient aucune logique spécifique à un fournisseur, réseau ou service particulier.
+
+### Catalogues dynamiques
+
+Depuis l'administration, un utilisateur autorisé doit pouvoir ajouter, modifier, activer, désactiver ou supprimer logiquement sans recompilation :
+
+- réseaux ;
+- fournisseurs ;
+- services ;
+- forfaits ;
+- unités ;
+- accessoires ;
+- prix ;
+- commissions ;
+- modes de fonctionnement ;
+- connecteurs.
+
+### Modes de fonctionnement
+
+Chaque service fonctionne selon un mode configurable : manuel, semi-automatique ou automatique. Le changement de mode est une configuration et ne nécessite jamais de modification de code.
+
+### Mode manuel prioritaire
+
+Le système doit fonctionner entièrement sans connecteur. En mode manuel, si le solde du portefeuille est suffisant, la commande est créée en attente, le Super Admin est notifié, l'exécution est réalisée manuellement, le résultat est validé, le client est notifié, le reçu est généré, l'historique est enregistré et l'audit est enregistré.
+
+Si le solde est insuffisant, la commande exécutable n'est pas créée, la tentative est enregistrée, l'agent ou le client reçoit un message d'insuffisance et le Super Admin reçoit une notification contenant le compte concerné, le solde actuel et la tentative.
+
+### Portefeuille
+
+Les agents et les clients possèdent un portefeuille USD/CDF. Toutes les ventes, dépôts, retraits, remboursements et commissions utilisent ce portefeuille. Le portefeuille ne dépend jamais d'un service particulier.
+
+### Client
+
+Le Client est un acteur officiel. Il peut créer un compte, consulter son historique, recevoir des notifications, télécharger ses reçus, consulter son portefeuille, acheter directement si autorisé ou passer par un agent.
+
+### Super Admin
+
+Le Super Admin possède initialement tous les droits, mais ces droits restent des permissions configurables. Il peut notamment gérer les catalogues, rôles, permissions, portefeuilles, commandes, fournisseurs, réseaux, forfaits, accessoires, commissions, prix, connecteurs, historiques et audits.
+
+### Connecteurs
+
+Les connecteurs ne doivent jamais être mélangés à la logique métier. Ils doivent pouvoir être activés, désactivés ou remplacés sans modifier les modules métier.

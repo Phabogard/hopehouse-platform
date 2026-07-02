@@ -12,7 +12,7 @@ export class AuditLogService {
     outcome: AuditOutcome;
     metadata?: Record<string, unknown>;
   }): AuditLog {
-    const entry: AuditLog = {
+    const entry: AuditLog = Object.freeze({
       id: randomUUID(),
       actorUserId: input.actorUserId,
       action: input.action,
@@ -20,13 +20,13 @@ export class AuditLogService {
       entityId: input.entityId,
       outcome: input.outcome,
       occurredAt: new Date().toISOString(),
-      metadata: input.metadata ?? {},
-    };
+      metadata: Object.freeze({ ...(input.metadata ?? {}) }),
+    });
     this.entries.push(entry);
     return entry;
   }
 
   list(): readonly AuditLog[] {
-    return this.entries;
+    return Object.freeze([...this.entries]);
   }
 }
