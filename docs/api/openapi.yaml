@@ -3,6 +3,21 @@ info:
   title: Hope House ERP API
   version: 0.1.0
   description: Contrat API initial du MVP Hope House ERP.
+x-targetArchitecture:
+  summary: Architecture cible documentaire validée avant implémentation.
+  principles:
+    - Moteur universel de commandes configurables.
+    - Cycle commun: création, validation, exécution, notification, reçu, historique, audit.
+    - Catalogues, rôles, permissions, prix, commissions, modes et connecteurs administrables sans recompilation.
+    - Portefeuilles multi-devise USD/CDF pour agents et clients.
+    - Connecteurs indépendants de la logique métier.
+  futureDocumentaryResources:
+    - /orders
+    - /catalogs
+    - /wallets
+    - /notifications
+    - /receipts
+    - /connectors
 paths:
   /health:
     get:
@@ -30,6 +45,12 @@ paths:
       summary: Crée un bénéficiaire.
       security:
         - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateBeneficiaryRequest'
       responses:
         '201':
           description: Bénéficiaire créé.
@@ -61,6 +82,12 @@ paths:
       summary: Crée un paiement.
       security:
         - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreatePaymentRequest'
       responses:
         '201':
           description: Paiement créé.
@@ -86,3 +113,37 @@ components:
       type: http
       scheme: bearer
       bearerFormat: JWT
+  schemas:
+    CreateBeneficiaryRequest:
+      type: object
+      required:
+        - reference
+        - displayName
+      properties:
+        reference:
+          type: string
+          minLength: 2
+        displayName:
+          type: string
+          minLength: 2
+    CreatePaymentRequest:
+      type: object
+      required:
+        - beneficiaryId
+        - amountCents
+        - currency
+      properties:
+        beneficiaryId:
+          type: string
+          minLength: 1
+        amountCents:
+          type: integer
+          minimum: 0
+        currency:
+          type: string
+          minLength: 3
+          maxLength: 3
+        paymentMethod:
+          type:
+            - string
+            - 'null'
