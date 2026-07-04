@@ -34,6 +34,7 @@ Chaque commande suit exactement le cycle suivant :
 ```text
 Création
   -> Validation
+  -> Paiement
   -> Exécution
   -> Notification
   -> Reçu
@@ -215,6 +216,6 @@ Avant toute future implémentation, il faut vérifier explicitement que la modif
 - les permissions configurables ;
 - le portefeuille multi-devise ;
 - l'indépendance des connecteurs ;
-- le cycle complet de commande ;
+- le cycle complet de commande incluant paiement ;
 - l'audit et l'historique ;
 - l'absence de logique spécifique à un fournisseur dans le code métier.
