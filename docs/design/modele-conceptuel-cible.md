@@ -95,7 +95,7 @@ Ligne de commande liée à un service configuré, un prix et des métadonnées d
 
 ### OrderStep
 
-Étape du cycle : création, validation, exécution, notification, reçu, historique, audit.
+Étape du cycle : création, validation, paiement, exécution, notification, reçu, historique, audit.
 
 ### OrderAttempt
 

@@ -7,7 +7,7 @@ x-targetArchitecture:
   summary: Architecture cible documentaire validée avant implémentation.
   principles:
     - Moteur universel de commandes configurables.
-    - Cycle commun: création, validation, exécution, notification, reçu, historique, audit.
+    - Cycle commun: création, validation, paiement, exécution, notification, reçu, historique, audit.
     - Catalogues, rôles, permissions, prix, commissions, modes et connecteurs administrables sans recompilation.
     - Portefeuilles multi-devise USD/CDF pour agents et clients.
     - Connecteurs indépendants de la logique métier.
@@ -18,6 +18,9 @@ x-targetArchitecture:
     - /notifications
     - /receipts
     - /connectors
+    - /qr-codes
+    - /messages
+    - /marketplace/accessories
 paths:
   /health:
     get:

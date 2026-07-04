@@ -277,7 +277,7 @@ CREATE TABLE order_items (
 CREATE TABLE order_steps (
   id TEXT PRIMARY KEY,
   order_id TEXT NOT NULL REFERENCES orders(id),
-  step TEXT NOT NULL CHECK (step IN ('creation', 'validation', 'execution', 'notification', 'receipt', 'history', 'audit')),
+  step TEXT NOT NULL CHECK (step IN ('creation', 'validation', 'payment', 'execution', 'notification', 'receipt', 'history', 'audit')),
   status TEXT NOT NULL CHECK (status IN ('pending', 'succeeded', 'failed', 'skipped')),
   actor_user_id TEXT REFERENCES users(id),
   occurred_at TEXT NOT NULL,
