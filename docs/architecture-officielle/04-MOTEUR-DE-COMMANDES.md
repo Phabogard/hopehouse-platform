@@ -15,6 +15,26 @@ Le moteur est le point d'entrée obligatoire de tout service vendable ou opérat
 7. Historique : transitions immuables et lisibles.
 8. Audit : action, acteur, contexte, résultat, métadonnées.
 
+## Implémentation actuelle — étape Order Engine
+
+Le premier incrément applicatif du moteur crée un domaine de commande générique, sans connecter encore les wallets, QR Codes, messagerie, notifications externes, reçus matériels, marketplace ou connecteurs. Cette limite est volontaire afin de ne développer qu'un grand module à la fois.
+
+### États officiels
+
+Les états applicatifs du cycle sont strictement ordonnés : `creation`, `validation`, `payment`, `execution`, `notification`, `receipt`, `history`, `audit`. Une commande démarre toujours à `creation` et ne peut avancer que vers l'état suivant. Les transitions arrière, les sauts d'étapes et les transitions après `audit` sont refusés.
+
+### Généricité obligatoire
+
+Une commande référence uniquement une configuration de service (`serviceDefinitionId`), un mode (`manual`, `semi_automatic` ou `automatic`), un acteur demandeur, un bénéficiaire optionnel, un canal optionnel, une intention monétaire optionnelle et des métadonnées. Le moteur ne connaît aucun fournisseur, réseau, commission, catalogue spécifique, produit, wallet, connecteur ou rôle codé en dur. Ces éléments devront être fournis par les futurs modules configurables.
+
+### Services métier
+
+Le service `OrderEngine` orchestre la création et l'avancement séquentiel. Il accepte des handlers optionnels par étape pour que les futurs modules configurables réalisent validation, paiement wallet, exécution, notification, reçu, historique et audit sans modifier la logique du moteur. Si un handler échoue, la transition n'est pas enregistrée.
+
+### Limites volontaires de cette étape
+
+Le paiement est un état orchestrable du cycle. Depuis l'étape Wallet Engine, un handler `payment` peut appeler le Wallet pour réserver ou débiter des fonds sans modifier le moteur de commandes. La notification et le reçu restent uniquement des états orchestrables. La persistance PostgreSQL reste documentaire dans `database/schema.sql` et sera connectée lors d'une étape dédiée.
+
 ## Modes
 
 Manuel : un utilisateur autorisé exécute hors système et confirme. Semi-automatique : le système prépare ou assiste, mais une validation humaine reste requise. Automatique : un connecteur actif exécute l'action technique. Le changement de mode est une configuration.

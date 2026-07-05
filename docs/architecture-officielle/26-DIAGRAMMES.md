@@ -29,6 +29,27 @@ flowchart LR
   Creation --> Validation --> Paiement --> Execution --> Notification --> Recu --> Historique --> Audit
 ```
 
+## Moteur Wallet
+
+```mermaid
+flowchart TD
+  Operation[Opération financière] --> Wallet[Wallet Engine]
+  Wallet --> Check[Verifier solde disponible]
+  Check --> Credit[Credit]
+  Check --> Debit[Debit]
+  Check --> Reserve[Reservation]
+  Reserve --> Release[Liberation]
+  Reserve --> Capture[Capture]
+  Credit --> Tx[Transaction immutable]
+  Debit --> Tx
+  Release --> Tx
+  Capture --> Tx
+  Tx --> Audit[Audit wallet]
+  Tx --> History[Historique complet]
+```
+
+Aucun module métier ne modifie directement les soldes. Le moteur de commandes appelle le Wallet via un handler de paiement configurable.
+
 ## Dépôt Agent vers Client
 
 ```mermaid

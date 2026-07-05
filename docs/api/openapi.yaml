@@ -11,8 +11,9 @@ x-targetArchitecture:
     - Catalogues, rôles, permissions, prix, commissions, modes et connecteurs administrables sans recompilation.
     - Portefeuilles multi-devise USD/CDF pour agents et clients.
     - Connecteurs indépendants de la logique métier.
-  futureDocumentaryResources:
+  implementedResources:
     - /orders
+  futureDocumentaryResources:
     - /catalogs
     - /wallets
     - /notifications
@@ -28,6 +29,50 @@ paths:
       responses:
         '200':
           description: API opérationnelle.
+  /orders:
+    post:
+      summary: Crée une commande générique dans le Moteur Universel de Commandes.
+      description: Crée uniquement le domaine Order à l'état creation. Aucun wallet, QR Code, messagerie, marketplace ou connecteur n'est exécuté dans cette étape.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateOrderRequest'
+      responses:
+        '201':
+          description: Commande créée à l'état creation.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderResponse'
+  /orders/{orderId}/transitions:
+    post:
+      summary: Avance une commande vers l'état officiel suivant.
+      description: La transition est acceptée uniquement si elle respecte le cycle creation → validation → payment → execution → notification → receipt → history → audit.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: orderId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdvanceOrderRequest'
+      responses:
+        '200':
+          description: Commande avancée vers l'état demandé.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderResponse'
   /users:
     get:
       summary: Liste les utilisateurs.
@@ -150,3 +195,406 @@ components:
           type:
             - string
             - 'null'
+
+    OrderStep:
+      type: string
+      enum:
+        - creation
+        - validation
+        - payment
+        - execution
+        - notification
+        - receipt
+        - history
+        - audit
+    OrderMode:
+      type: string
+      enum:
+        - manual
+        - semi_automatic
+        - automatic
+    OrderMonetaryIntent:
+      type: object
+      required:
+        - amountCents
+        - currency
+      properties:
+        amountCents:
+          type: integer
+          minimum: 0
+        currency:
+          type: string
+          minLength: 3
+          maxLength: 3
+    CreateOrderRequest:
+      type: object
+      required:
+        - requesterActorId
+        - serviceDefinitionId
+        - mode
+      properties:
+        requesterActorId:
+          type: string
+          minLength: 1
+        serviceDefinitionId:
+          type: string
+          minLength: 1
+          description: Référence une configuration de service; aucun service fournisseur n'est codé en dur par le moteur.
+        mode:
+          $ref: '#/components/schemas/OrderMode'
+        beneficiaryId:
+          type:
+            - string
+            - 'null'
+        channel:
+          type:
+            - string
+            - 'null'
+        monetaryIntent:
+          oneOf:
+            - $ref: '#/components/schemas/OrderMonetaryIntent'
+            - type: 'null'
+        metadata:
+          type: object
+          additionalProperties: true
+    AdvanceOrderRequest:
+      type: object
+      required:
+        - actorId
+        - toStep
+      properties:
+        actorId:
+          type: string
+          minLength: 1
+        toStep:
+          $ref: '#/components/schemas/OrderStep'
+        metadata:
+          type: object
+          additionalProperties: true
+    OrderTransition:
+      type: object
+      required:
+        - id
+        - orderId
+        - fromStep
+        - toStep
+        - outcome
+        - actorId
+        - occurredAt
+        - metadata
+      properties:
+        id:
+          type: string
+        orderId:
+          type: string
+        fromStep:
+          oneOf:
+            - $ref: '#/components/schemas/OrderStep'
+            - type: 'null'
+        toStep:
+          $ref: '#/components/schemas/OrderStep'
+        outcome:
+          type: string
+          enum:
+            - succeeded
+            - failed
+        actorId:
+          type: string
+        occurredAt:
+          type: string
+          format: date-time
+        metadata:
+          type: object
+          additionalProperties: true
+    Order:
+      type: object
+      required:
+        - id
+        - orderNumber
+        - currentStep
+        - configuration
+        - requester
+        - transitions
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: string
+        orderNumber:
+          type: string
+        currentStep:
+          $ref: '#/components/schemas/OrderStep'
+        configuration:
+          type: object
+          required:
+            - serviceDefinitionId
+            - mode
+          properties:
+            serviceDefinitionId:
+              type: string
+            mode:
+              $ref: '#/components/schemas/OrderMode'
+        requester:
+          type: object
+          required:
+            - id
+          properties:
+            id:
+              type: string
+        beneficiaryId:
+          type:
+            - string
+            - 'null'
+        channel:
+          type:
+            - string
+            - 'null'
+        monetaryIntent:
+          oneOf:
+            - $ref: '#/components/schemas/OrderMonetaryIntent'
+            - type: 'null'
+        metadata:
+          type: object
+          additionalProperties: true
+        transitions:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrderTransition'
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    OrderResponse:
+      type: object
+      required:
+        - data
+      properties:
+        data:
+          $ref: '#/components/schemas/Order'
+    WalletBalance:
+      type: object
+      required:
+        - currency
+        - availableCents
+        - reservedCents
+        - updatedAt
+      properties:
+        currency:
+          type: string
+          minLength: 3
+          maxLength: 3
+          description: Devise fournie par configuration; OpenAPI ne limite pas la liste des devises.
+        availableCents:
+          type: integer
+          minimum: 0
+        reservedCents:
+          type: integer
+          minimum: 0
+        updatedAt:
+          type: string
+          format: date-time
+    WalletTransaction:
+      type: object
+      required:
+        - id
+        - walletId
+        - type
+        - status
+        - amountCents
+        - currency
+        - actorId
+        - occurredAt
+        - metadata
+      properties:
+        id:
+          type: string
+        walletId:
+          type: string
+        type:
+          type: string
+          enum:
+            - credit
+            - debit
+            - reservation
+            - release
+            - capture
+            - rollback
+        status:
+          type: string
+          enum:
+            - succeeded
+            - failed
+        amountCents:
+          type: integer
+          minimum: 1
+        currency:
+          type: string
+          minLength: 3
+          maxLength: 3
+        actorId:
+          type: string
+        transactionKey:
+          type:
+            - string
+            - 'null'
+        relatedEntityType:
+          type:
+            - string
+            - 'null'
+        relatedEntityId:
+          type:
+            - string
+            - 'null'
+        reversalOfTransactionId:
+          type:
+            - string
+            - 'null'
+        reservationId:
+          type:
+            - string
+            - 'null'
+        occurredAt:
+          type: string
+          format: date-time
+        metadata:
+          type: object
+          additionalProperties: true
+    WalletReservation:
+      type: object
+      required:
+        - id
+        - walletId
+        - status
+        - amountCents
+        - currency
+        - createdByTransactionId
+        - createdAt
+        - updatedAt
+        - metadata
+      properties:
+        id:
+          type: string
+        walletId:
+          type: string
+        status:
+          type: string
+          enum:
+            - active
+            - released
+            - captured
+            - rolled_back
+        amountCents:
+          type: integer
+          minimum: 1
+        currency:
+          type: string
+          minLength: 3
+          maxLength: 3
+        createdByTransactionId:
+          type: string
+        closedByTransactionId:
+          type:
+            - string
+            - 'null'
+        relatedEntityType:
+          type:
+            - string
+            - 'null'
+        relatedEntityId:
+          type:
+            - string
+            - 'null'
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        metadata:
+          type: object
+          additionalProperties: true
+    WalletAuditEvent:
+      type: object
+      required:
+        - id
+        - walletId
+        - transactionId
+        - action
+        - actorId
+        - outcome
+        - occurredAt
+        - metadata
+      properties:
+        id:
+          type: string
+        walletId:
+          type: string
+        transactionId:
+          type: string
+        action:
+          type: string
+        actorId:
+          type: string
+        outcome:
+          type: string
+          enum:
+            - succeeded
+            - failed
+        occurredAt:
+          type: string
+          format: date-time
+        metadata:
+          type: object
+          additionalProperties: true
+    Wallet:
+      type: object
+      required:
+        - id
+        - ownerType
+        - ownerId
+        - status
+        - balances
+        - transactions
+        - reservations
+        - auditEvents
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: string
+        ownerType:
+          type: string
+          description: Type de propriétaire fourni par configuration; aucun rôle n'est imposé par le moteur.
+        ownerId:
+          type: string
+        status:
+          type: string
+          enum:
+            - active
+            - inactive
+            - suspended
+            - archived
+        balances:
+          type: array
+          items:
+            $ref: '#/components/schemas/WalletBalance'
+        transactions:
+          type: array
+          items:
+            $ref: '#/components/schemas/WalletTransaction'
+        reservations:
+          type: array
+          items:
+            $ref: '#/components/schemas/WalletReservation'
+        auditEvents:
+          type: array
+          items:
+            $ref: '#/components/schemas/WalletAuditEvent'
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time

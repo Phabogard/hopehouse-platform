@@ -4,22 +4,26 @@ import { AuditLogService } from './modules/audit/audit-log.js';
 import { createBeneficiary } from './modules/beneficiaries/beneficiaries.js';
 import { createInvoice } from './modules/invoices/invoices.js';
 import { createPayment } from './modules/payments/payments.js';
+import { OrderEngine, orderCycle, type Order, type OrderMode, type OrderStep } from './modules/orders/index.js';
 import { authorize, type Actor } from './modules/rbac/authorize.js';
 import { createServiceOffering } from './modules/services/services.js';
 import { createSubscription } from './modules/subscriptions/subscriptions.js';
 import { createUser } from './modules/users/users.js';
 
 const audit = new AuditLogService();
+const orderEngine = new OrderEngine();
+const orders = new Map<string, Order>();
 
 const demoReadActor: Actor = { id: 'system', role: 'system_admin' };
 const demoBeneficiaryWriteActor: Actor = { id: 'business-demo', role: 'business_admin' };
 const demoPaymentWriteActor: Actor = { id: 'finance-demo', role: 'finance_manager' };
+const demoOrderActor = { id: 'order-demo' };
 const maxJsonBodyBytes = 1_000_000;
 
 type JsonObject = Record<string, unknown>;
 
 interface SensitiveAuditContext {
-  actor: Actor;
+  actorUserId: string;
   action: string;
   entityType: string;
 }
@@ -48,13 +52,40 @@ function integerField(body: JsonObject, fieldName: string): number {
   return Number(value);
 }
 
+function optionalObjectField(body: JsonObject, fieldName: string): Record<string, unknown> | null {
+  const value = body[fieldName];
+  if (value === undefined || value === null) return null;
+  if (typeof value !== 'object' || Array.isArray(value)) throw new ValidationError(`Le champ ${fieldName} doit être un objet`);
+  return value as Record<string, unknown>;
+}
+
+function orderModeField(body: JsonObject, fieldName: string): OrderMode {
+  const value = stringField(body, fieldName);
+  if (!['manual', 'semi_automatic', 'automatic'].includes(value)) throw new ValidationError(`Le champ ${fieldName} est invalide`);
+  return value as OrderMode;
+}
+
+function orderStepField(body: JsonObject, fieldName: string): OrderStep {
+  const value = stringField(body, fieldName);
+  if (!(orderCycle as readonly string[]).includes(value)) throw new ValidationError(`Le champ ${fieldName} est invalide`);
+  return value as OrderStep;
+}
+
 function sensitiveAuditContext(method: string | undefined, pathname: string): SensitiveAuditContext | null {
   if (method === 'POST' && pathname === '/beneficiaries') {
-    return { actor: demoBeneficiaryWriteActor, action: 'beneficiary.create', entityType: 'beneficiary' };
+    return { actorUserId: demoBeneficiaryWriteActor.id, action: 'beneficiary.create', entityType: 'beneficiary' };
   }
 
   if (method === 'POST' && pathname === '/payments') {
-    return { actor: demoPaymentWriteActor, action: 'payment.create', entityType: 'payment' };
+    return { actorUserId: demoPaymentWriteActor.id, action: 'payment.create', entityType: 'payment' };
+  }
+
+  if (method === 'POST' && pathname === '/orders') {
+    return { actorUserId: demoOrderActor.id, action: 'order.create', entityType: 'order' };
+  }
+
+  if (method === 'POST' && pathname.match(/^\/orders\/[^/]+\/transitions$/) !== null) {
+    return { actorUserId: demoOrderActor.id, action: 'order.transition', entityType: 'order' };
   }
 
   return null;
@@ -104,6 +135,40 @@ export function createHopeHouseServer() {
     }
 
     try {
+
+      if (request.method === 'POST' && url.pathname === '/orders') {
+        const body = await readJsonBody(request);
+        const monetaryIntent = optionalObjectField(body, 'monetaryIntent');
+        const order = orderEngine.create({
+          requesterActorId: stringField(body, 'requesterActorId'),
+          serviceDefinitionId: stringField(body, 'serviceDefinitionId'),
+          mode: orderModeField(body, 'mode'),
+          beneficiaryId: optionalStringField(body, 'beneficiaryId'),
+          channel: optionalStringField(body, 'channel'),
+          monetaryIntent: monetaryIntent === null ? null : { amountCents: integerField(monetaryIntent, 'amountCents'), currency: stringField(monetaryIntent, 'currency') },
+          metadata: optionalObjectField(body, 'metadata') ?? undefined,
+        });
+        orders.set(order.id, order);
+        sendJson(response, 201, { data: order });
+        return;
+      }
+
+      if (request.method === 'POST' && url.pathname.match(/^\/orders\/[^/]+\/transitions$/) !== null) {
+        const orderId = url.pathname.split('/')[2];
+        const order = orders.get(orderId);
+        if (order === undefined) throw new ValidationError('Commande introuvable');
+        const body = await readJsonBody(request);
+        const advancedOrder = await orderEngine.advance({
+          order,
+          actorId: stringField(body, 'actorId'),
+          toStep: orderStepField(body, 'toStep'),
+          metadata: optionalObjectField(body, 'metadata') ?? undefined,
+        });
+        orders.set(advancedOrder.id, advancedOrder);
+        sendJson(response, 200, { data: advancedOrder });
+        return;
+      }
+
       if (request.method === 'GET' && url.pathname === '/users') {
         authorize(demoReadActor, 'users:read');
         sendJson(response, 200, { data: [createUser({ email: 'admin@hopehouse.local', displayName: 'System Admin', role: 'system_admin' })] });
@@ -177,7 +242,7 @@ export function createHopeHouseServer() {
 
       if (auditContext !== null) {
         audit.record({
-          actorUserId: auditContext.actor.id,
+          actorUserId: auditContext.actorUserId,
           action: auditContext.action,
           entityType: auditContext.entityType,
           entityId: 'collection',

@@ -220,7 +220,7 @@ CREATE TABLE commission_rules (
 
 CREATE TABLE wallets (
   id TEXT PRIMARY KEY,
-  owner_type TEXT NOT NULL CHECK (owner_type IN ('agent', 'client')),
+  owner_type TEXT NOT NULL,
   owner_id TEXT NOT NULL,
   status TEXT NOT NULL CHECK (status IN ('active', 'inactive', 'suspended', 'archived')),
   created_at TEXT NOT NULL,
@@ -230,7 +230,7 @@ CREATE TABLE wallets (
 
 CREATE TABLE wallet_balances (
   wallet_id TEXT NOT NULL REFERENCES wallets(id),
-  currency TEXT NOT NULL CHECK (currency IN ('USD', 'CDF')),
+  currency TEXT NOT NULL,
   available_cents INTEGER NOT NULL CHECK (available_cents >= 0),
   reserved_cents INTEGER NOT NULL CHECK (reserved_cents >= 0),
   updated_at TEXT NOT NULL,
@@ -240,12 +240,43 @@ CREATE TABLE wallet_balances (
 CREATE TABLE wallet_transactions (
   id TEXT PRIMARY KEY,
   wallet_id TEXT NOT NULL REFERENCES wallets(id),
-  currency TEXT NOT NULL CHECK (currency IN ('USD', 'CDF')),
-  amount_cents INTEGER NOT NULL,
-  type TEXT NOT NULL CHECK (type IN ('deposit', 'withdrawal', 'sale', 'refund', 'commission', 'correction', 'reservation', 'release')),
-  status TEXT NOT NULL CHECK (status IN ('pending', 'succeeded', 'failed', 'cancelled')),
+  currency TEXT NOT NULL,
+  amount_cents INTEGER NOT NULL CHECK (amount_cents > 0),
+  type TEXT NOT NULL CHECK (type IN ('credit', 'debit', 'reservation', 'release', 'capture', 'rollback')),
+  status TEXT NOT NULL CHECK (status IN ('succeeded', 'failed')),
+  actor_user_id TEXT REFERENCES users(id),
+  transaction_key TEXT,
   related_entity_type TEXT,
   related_entity_id TEXT,
+  reversal_of_transaction_id TEXT REFERENCES wallet_transactions(id),
+  reservation_id TEXT,
+  occurred_at TEXT NOT NULL,
+  metadata_json TEXT NOT NULL,
+  UNIQUE (wallet_id, transaction_key)
+);
+
+CREATE TABLE wallet_reservations (
+  id TEXT PRIMARY KEY,
+  wallet_id TEXT NOT NULL REFERENCES wallets(id),
+  currency TEXT NOT NULL,
+  amount_cents INTEGER NOT NULL CHECK (amount_cents > 0),
+  status TEXT NOT NULL CHECK (status IN ('active', 'released', 'captured', 'rolled_back')),
+  created_by_transaction_id TEXT NOT NULL REFERENCES wallet_transactions(id),
+  closed_by_transaction_id TEXT REFERENCES wallet_transactions(id),
+  related_entity_type TEXT,
+  related_entity_id TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  metadata_json TEXT NOT NULL
+);
+
+CREATE TABLE wallet_audit_events (
+  id TEXT PRIMARY KEY,
+  wallet_id TEXT NOT NULL REFERENCES wallets(id),
+  transaction_id TEXT NOT NULL REFERENCES wallet_transactions(id),
+  action TEXT NOT NULL,
+  actor_user_id TEXT REFERENCES users(id),
+  outcome TEXT NOT NULL CHECK (outcome IN ('succeeded', 'failed')),
   occurred_at TEXT NOT NULL,
   metadata_json TEXT NOT NULL
 );
@@ -256,10 +287,14 @@ CREATE TABLE orders (
   requester_user_id TEXT REFERENCES users(id),
   client_profile_id TEXT REFERENCES client_profiles(id),
   agent_profile_id TEXT REFERENCES agent_profiles(id),
-  status TEXT NOT NULL CHECK (status IN ('draft', 'pending_validation', 'pending_execution', 'executed', 'notified', 'receipt_generated', 'completed', 'failed', 'cancelled', 'archived')),
+  current_step TEXT NOT NULL CHECK (current_step IN ('creation', 'validation', 'payment', 'execution', 'notification', 'receipt', 'history', 'audit')),
+  service_definition_id TEXT NOT NULL REFERENCES service_definitions(id),
   mode TEXT NOT NULL CHECK (mode IN ('manual', 'semi_automatic', 'automatic')),
-  currency TEXT NOT NULL CHECK (currency IN ('USD', 'CDF')),
-  total_cents INTEGER NOT NULL CHECK (total_cents >= 0),
+  beneficiary_id TEXT,
+  channel TEXT,
+  currency TEXT,
+  total_cents INTEGER CHECK (total_cents >= 0),
+  metadata_json TEXT NOT NULL,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
@@ -296,11 +331,12 @@ CREATE TABLE order_attempts (
   metadata_json TEXT NOT NULL
 );
 
-CREATE TABLE order_history (
+CREATE TABLE order_transitions (
   id TEXT PRIMARY KEY,
   order_id TEXT NOT NULL REFERENCES orders(id),
-  from_status TEXT,
-  to_status TEXT NOT NULL,
+  from_step TEXT CHECK (from_step IN ('creation', 'validation', 'payment', 'execution', 'notification', 'receipt', 'history', 'audit')),
+  to_step TEXT NOT NULL CHECK (to_step IN ('creation', 'validation', 'payment', 'execution', 'notification', 'receipt', 'history', 'audit')),
+  outcome TEXT NOT NULL CHECK (outcome IN ('succeeded', 'failed')),
   actor_user_id TEXT REFERENCES users(id),
   occurred_at TEXT NOT NULL,
   metadata_json TEXT NOT NULL
