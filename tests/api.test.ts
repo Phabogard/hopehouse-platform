@@ -74,3 +74,61 @@ test('failed sensitive create operations are audited', async () => {
     assert.equal(failedPaymentAudit?.metadata.statusCode, 422);
   });
 });
+
+test('POST /orders creates a generic order at the official creation step', async () => {
+  await withServer(async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/orders`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        requesterActorId: 'actor-api-1',
+        serviceDefinitionId: 'service-definition-from-configuration',
+        mode: 'manual',
+        beneficiaryId: 'BEN-API-001',
+        channel: 'api',
+        monetaryIntent: { amountCents: 2500, currency: 'usd' },
+        metadata: { source: 'api-test' },
+      }),
+    });
+    const body = await response.json() as { data: { id: string; currentStep: string; configuration: { serviceDefinitionId: string; mode: string }; monetaryIntent: { amountCents: number; currency: string }; transitions: Array<{ toStep: string }> } };
+
+    assert.equal(response.status, 201);
+    assert.equal(body.data.currentStep, 'creation');
+    assert.equal(body.data.configuration.serviceDefinitionId, 'service-definition-from-configuration');
+    assert.equal(body.data.configuration.mode, 'manual');
+    assert.equal(body.data.monetaryIntent.currency, 'USD');
+    assert.equal(body.data.transitions.length, 1);
+    assert.equal(body.data.transitions[0]?.toStep, 'creation');
+  });
+});
+
+test('POST /orders/{orderId}/transitions advances only to the next official step', async () => {
+  await withServer(async (baseUrl) => {
+    const createResponse = await fetch(`${baseUrl}/orders`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ requesterActorId: 'actor-api-1', serviceDefinitionId: 'service-definition-from-configuration', mode: 'automatic' }),
+    });
+    const created = await createResponse.json() as { data: { id: string } };
+
+    const invalidResponse = await fetch(`${baseUrl}/orders/${created.data.id}/transitions`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ actorId: 'actor-api-1', toStep: 'payment' }),
+    });
+    assert.equal(invalidResponse.status, 422);
+
+    const validResponse = await fetch(`${baseUrl}/orders/${created.data.id}/transitions`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ actorId: 'actor-api-1', toStep: 'validation', metadata: { checked: true } }),
+    });
+    const advanced = await validResponse.json() as { data: { currentStep: string; transitions: Array<{ fromStep: string | null; toStep: string }> } };
+
+    assert.equal(validResponse.status, 200);
+    assert.equal(advanced.data.currentStep, 'validation');
+    assert.equal(advanced.data.transitions.length, 2);
+    assert.equal(advanced.data.transitions[1]?.fromStep, 'creation');
+    assert.equal(advanced.data.transitions[1]?.toStep, 'validation');
+  });
+});

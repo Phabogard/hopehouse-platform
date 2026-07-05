@@ -12,6 +12,34 @@ Chaque devise possède solde disponible, solde réservé, statut et date de mise
 
 Paiement, dépôt, retrait, transfert, commission, remboursement, correction, réservation, libération et rollback sont des transactions wallet. Chaque transaction possède type, statut, montant, devise, initiateur, bénéficiaire, entité liée, reçu, QR transactionnel et audit.
 
+## Implémentation actuelle — étape Wallet Engine
+
+Le moteur Wallet est le seul composant applicatif autorisé à modifier un solde numérique. Les autres modules, y compris le moteur de commandes, doivent appeler le Wallet au lieu de manipuler directement les soldes.
+
+### Modèles applicatifs
+
+Le moteur définit `Wallet`, `WalletBalance`, `WalletTransaction` et `WalletReservation`. Un wallet possède des soldes par devise configurée, un historique immutable de transactions, des réservations, des événements d'audit et des clés de transaction déjà traitées pour empêcher les doubles traitements.
+
+### Opérations génériques
+
+Les opérations disponibles sont crédit, débit, réservation, libération, capture, rollback, vérification du solde et vérification des fonds disponibles. Chaque opération financière exige un acteur, un montant strictement positif, une devise fournie par configuration, des métadonnées optionnelles et peut recevoir une clé de transaction idempotente.
+
+### Devises configurables
+
+Le moteur ne contient aucune liste de devises autorisées. Il normalise uniquement le code devise à trois caractères. L'activation, la précision, les limites et les règles par devise devront provenir des catalogues configurables.
+
+### Réservations et rollback
+
+Une réservation déplace le montant du solde disponible vers le solde réservé. Une libération rend le montant disponible. Une capture consomme le solde réservé. Un rollback crée une nouvelle transaction de type `rollback` ou libère une réservation active ; il ne modifie jamais l'historique existant. Une même transaction ne peut être rollbackée qu'une seule fois.
+
+### Audit et immutabilité
+
+Chaque transaction génère un événement d'audit wallet. Les transactions, réservations, balances et événements retournés par le moteur sont immutables côté domaine. La persistance PostgreSQL reste représentée par le schéma conceptuel et sera branchée lors d'une étape dédiée.
+
+### Intégration avec le moteur de commandes
+
+Le handler configurable de l'étape `payment` du `OrderEngine` peut appeler le Wallet pour réserver, débiter ou capturer des fonds sans modifier le moteur de commandes. Aucun fournisseur, QR Code, marketplace, messagerie ou connecteur externe n'est branché dans cette étape.
+
 ## Dépôt Super Admin → Agent
 
 Le Super Admin crédite le wallet Agent selon permissions. Aucun calcul de commission. L'action exige justification, audit et reçu.
