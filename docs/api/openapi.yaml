@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Hope House ERP API
-  version: 0.1.0
+  version: 0.2.0
   description: Contrat API initial du MVP Hope House ERP.
 x-targetArchitecture:
   summary: Architecture cible documentaire validée avant implémentation.
@@ -22,6 +22,10 @@ x-targetArchitecture:
     - /qr-codes
     - /messages
     - /marketplace/accessories
+    - /auth
+    - /security/devices
+    - /security/events
+    - /admin/security
 paths:
   /health:
     get:
@@ -155,6 +159,396 @@ paths:
       responses:
         '200':
           description: Liste des traces d'audit.
+  /auth/login:
+    post:
+      tags:
+        - Authentication
+      summary: Démarre une authentification configurable.
+      description: Contrat documentaire du Lot 1. L'implémentation métier sera livrée ultérieurement. Les durées, seuils et politiques proviennent de app_settings, sans valeur codée en dur dans la logique métier.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Authentification acceptée ou challenge 2FA requis.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+        '401':
+          description: Identifiants invalides.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          description: Politique configurable de blocage ou limitation atteinte.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /auth/refresh:
+    post:
+      tags:
+        - Authentication
+      summary: Rafraîchit une session avec rotation obligatoire du refresh token.
+      description: Le refresh token est rotatif, stocké côté serveur uniquement sous forme d'empreinte hashée, et révocable globalement ou par appareil.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshTokenRequest'
+      responses:
+        '200':
+          description: Nouveau couple de tokens émis.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RefreshTokenResponse'
+        '401':
+          description: Refresh token invalide, expiré, révoqué ou réutilisé après rotation.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /auth/logout:
+    post:
+      tags:
+        - Authentication
+      summary: Révoque la session courante.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LogoutRequest'
+      responses:
+        '204':
+          description: Session révoquée.
+        '401':
+          description: Session absente ou invalide.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /auth/password-reset/request:
+    post:
+      tags:
+        - Authentication
+      summary: Demande une réinitialisation de mot de passe.
+      description: La réponse reste neutre pour éviter l'énumération de comptes; les délais et canaux sont configurés via app_settings et notifications configurables.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PasswordResetRequest'
+      responses:
+        '202':
+          description: Demande acceptée si éligible.
+  /auth/password-reset/confirm:
+    post:
+      tags:
+        - Authentication
+      summary: Confirme une réinitialisation de mot de passe.
+      description: Le token de réinitialisation est stocké uniquement sous forme d'empreinte hashée et expire selon app_settings.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PasswordResetConfirmRequest'
+      responses:
+        '200':
+          description: Mot de passe réinitialisé et sessions révoquées selon politique configurable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericSuccessResponse'
+        '401':
+          description: Token invalide ou expiré.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /auth/2fa/challenges/{challengeId}/verify:
+    post:
+      tags:
+        - Authentication
+      summary: Vérifie un challenge 2FA configurable.
+      parameters:
+        - name: challengeId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TwoFactorVerifyRequest'
+      responses:
+        '200':
+          description: Challenge validé.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TwoFactorChallengeResponse'
+        '401':
+          description: Challenge invalide, expiré ou refusé.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /auth/sessions:
+    get:
+      tags:
+        - Authentication
+      summary: Liste les sessions de l'utilisateur courant.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Sessions utilisateur.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionListResponse'
+    delete:
+      tags:
+        - Authentication
+      summary: Révoque globalement les sessions de l'utilisateur courant.
+      security:
+        - bearerAuth: []
+      responses:
+        '204':
+          description: Sessions révoquées selon politique configurable.
+  /auth/sessions/{sessionId}:
+    delete:
+      tags:
+        - Authentication
+      summary: Révoque une session spécifique.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Session révoquée.
+  /security/devices:
+    get:
+      tags:
+        - Security
+      summary: Liste les appareils de l'utilisateur courant.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Appareils utilisateur.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeviceListResponse'
+  /security/devices/{deviceId}:
+    patch:
+      tags:
+        - Security
+      summary: Met à jour les métadonnées configurables d'un appareil.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: deviceId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateDeviceRequest'
+      responses:
+        '200':
+          description: Appareil mis à jour.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeviceResponseEnvelope'
+    delete:
+      tags:
+        - Security
+      summary: Révoque un appareil et les sessions liées selon politique configurable.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: deviceId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Appareil révoqué.
+  /security/events:
+    get:
+      tags:
+        - Security
+      summary: Liste les événements de sécurité consultables par l'utilisateur courant.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Événements de sécurité.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SecurityEventListResponse'
+  /admin/security/login-attempts:
+    get:
+      tags:
+        - Admin Security
+      summary: Consulte les tentatives de connexion selon permissions configurables.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Tentatives de connexion.
+  /admin/security/sessions:
+    get:
+      tags:
+        - Admin Security
+      summary: Consulte les sessions selon permissions configurables.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Sessions administrables.
+  /admin/security/users/{userId}/unlock:
+    post:
+      tags:
+        - Admin Security
+      summary: Débloque un utilisateur selon règle configurée et audit obligatoire.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminJustificationRequest'
+      responses:
+        '200':
+          description: Utilisateur débloqué.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericSuccessResponse'
+  /admin/security/users/{userId}/revoke-sessions:
+    post:
+      tags:
+        - Admin Security
+      summary: Révoque les sessions d'un utilisateur avec justification et audit.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminJustificationRequest'
+      responses:
+        '200':
+          description: Sessions utilisateur révoquées.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericSuccessResponse'
+  /admin/security/users/{userId}/revoke-devices:
+    post:
+      tags:
+        - Admin Security
+      summary: Révoque les appareils d'un utilisateur avec justification et audit.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminJustificationRequest'
+      responses:
+        '200':
+          description: Appareils utilisateur révoqués.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericSuccessResponse'
+  /admin/login-as:
+    post:
+      tags:
+        - Admin Security
+      summary: Démarre une session Login As avec justification, 2FA configurable et audit complet.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginAsRequest'
+      responses:
+        '200':
+          description: Session Login As créée.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginAsResponse'
+  /admin/login-as/{sessionId}:
+    delete:
+      tags:
+        - Admin Security
+      summary: Termine une session Login As.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Session Login As terminée.
 components:
   securitySchemes:
     bearerAuth:
@@ -162,6 +556,368 @@ components:
       scheme: bearer
       bearerFormat: JWT
   schemas:
+    ErrorResponse:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          type: object
+          required:
+            - code
+            - message
+          properties:
+            code:
+              type: string
+            message:
+              type: string
+            details:
+              type: object
+              additionalProperties: true
+            traceId:
+              type:
+                - string
+                - 'null'
+    GenericSuccessResponse:
+      type: object
+      required:
+        - data
+      properties:
+        data:
+          type: object
+          additionalProperties: true
+    DeviceContext:
+      type: object
+      properties:
+        fingerprint:
+          type:
+            - string
+            - 'null'
+          description: Empreinte fournie par configuration client; l'API cible stocke uniquement une empreinte hashée côté serveur.
+        userAgent:
+          type:
+            - string
+            - 'null'
+        ipAddress:
+          type:
+            - string
+            - 'null'
+        metadata:
+          type: object
+          additionalProperties: true
+    LoginRequest:
+      type: object
+      required:
+        - identifier
+        - password
+      properties:
+        identifier:
+          type: string
+          minLength: 1
+        password:
+          type: string
+          minLength: 1
+        device:
+          $ref: '#/components/schemas/DeviceContext'
+        metadata:
+          type: object
+          additionalProperties: true
+    LoginResponse:
+      type: object
+      required:
+        - data
+      properties:
+        data:
+          type: object
+          required:
+            - requiresTwoFactor
+          properties:
+            accessToken:
+              type:
+                - string
+                - 'null'
+              description: Jeton court; durée par défaut 15 minutes depuis app_settings.
+            refreshToken:
+              type:
+                - string
+                - 'null'
+              description: Jeton rotatif; stockage serveur uniquement sous forme d'empreinte hashée.
+            requiresTwoFactor:
+              type: boolean
+            session:
+              oneOf:
+                - $ref: '#/components/schemas/SessionResponse'
+                - type: 'null'
+            challenge:
+              oneOf:
+                - $ref: '#/components/schemas/TwoFactorChallengeResponse'
+                - type: 'null'
+    RefreshTokenRequest:
+      type: object
+      required:
+        - refreshToken
+      properties:
+        refreshToken:
+          type: string
+          minLength: 1
+        device:
+          $ref: '#/components/schemas/DeviceContext'
+    RefreshTokenResponse:
+      type: object
+      required:
+        - data
+      properties:
+        data:
+          type: object
+          required:
+            - accessToken
+            - refreshToken
+            - session
+          properties:
+            accessToken:
+              type: string
+            refreshToken:
+              type: string
+              description: Nouveau refresh token émis après rotation obligatoire.
+            session:
+              $ref: '#/components/schemas/SessionResponse'
+    LogoutRequest:
+      type: object
+      properties:
+        sessionId:
+          type:
+            - string
+            - 'null'
+    PasswordResetRequest:
+      type: object
+      required:
+        - identifier
+      properties:
+        identifier:
+          type: string
+          minLength: 1
+    PasswordResetConfirmRequest:
+      type: object
+      required:
+        - resetToken
+        - newPassword
+      properties:
+        resetToken:
+          type: string
+          minLength: 1
+          description: Token présenté par le client; stockage serveur uniquement sous forme d'empreinte hashée.
+        newPassword:
+          type: string
+          minLength: 1
+        metadata:
+          type: object
+          additionalProperties: true
+    TwoFactorChallengeResponse:
+      type: object
+      required:
+        - id
+        - method
+        - status
+        - expiresAt
+      properties:
+        id:
+          type: string
+        method:
+          type: string
+          description: Méthode 2FA fournie par configuration; aucun fournisseur n'est imposé par le contrat.
+        status:
+          type: string
+          enum:
+            - pending
+            - succeeded
+            - failed
+            - expired
+        expiresAt:
+          type: string
+          format: date-time
+    TwoFactorVerifyRequest:
+      type: object
+      required:
+        - code
+      properties:
+        code:
+          type: string
+          minLength: 1
+        metadata:
+          type: object
+          additionalProperties: true
+    SessionResponse:
+      type: object
+      required:
+        - id
+        - status
+        - issuedAt
+        - expiresAt
+      properties:
+        id:
+          type: string
+        status:
+          type: string
+          enum:
+            - active
+            - revoked
+            - expired
+            - archived
+        deviceId:
+          type:
+            - string
+            - 'null'
+        issuedAt:
+          type: string
+          format: date-time
+        expiresAt:
+          type: string
+          format: date-time
+        idleExpiresAt:
+          type:
+            - string
+            - 'null'
+          format: date-time
+        lastSeenAt:
+          type:
+            - string
+            - 'null'
+          format: date-time
+    SessionListResponse:
+      type: object
+      required:
+        - data
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/SessionResponse'
+    DeviceResponse:
+      type: object
+      required:
+        - id
+        - status
+        - firstSeenAt
+        - lastSeenAt
+      properties:
+        id:
+          type: string
+        label:
+          type:
+            - string
+            - 'null'
+        status:
+          type: string
+          enum:
+            - pending
+            - trusted
+            - untrusted
+            - revoked
+            - archived
+        firstSeenAt:
+          type: string
+          format: date-time
+        lastSeenAt:
+          type: string
+          format: date-time
+    DeviceResponseEnvelope:
+      type: object
+      required:
+        - data
+      properties:
+        data:
+          $ref: '#/components/schemas/DeviceResponse'
+    DeviceListResponse:
+      type: object
+      required:
+        - data
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/DeviceResponse'
+    UpdateDeviceRequest:
+      type: object
+      properties:
+        label:
+          type:
+            - string
+            - 'null'
+        metadata:
+          type: object
+          additionalProperties: true
+    SecurityEventResponse:
+      type: object
+      required:
+        - id
+        - eventType
+        - severity
+        - occurredAt
+      properties:
+        id:
+          type: string
+        eventType:
+          type: string
+        severity:
+          type: string
+          enum:
+            - info
+            - medium
+            - major
+            - critical
+        occurredAt:
+          type: string
+          format: date-time
+        metadata:
+          type: object
+          additionalProperties: true
+    SecurityEventListResponse:
+      type: object
+      required:
+        - data
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/SecurityEventResponse'
+    AdminJustificationRequest:
+      type: object
+      required:
+        - reason
+      properties:
+        reason:
+          type: string
+          minLength: 1
+        metadata:
+          type: object
+          additionalProperties: true
+    LoginAsRequest:
+      type: object
+      required:
+        - targetUserId
+        - reason
+      properties:
+        targetUserId:
+          type: string
+          minLength: 1
+        reason:
+          type: string
+          minLength: 1
+        metadata:
+          type: object
+          additionalProperties: true
+    LoginAsResponse:
+      type: object
+      required:
+        - data
+      properties:
+        data:
+          type: object
+          required:
+            - sessionId
+          properties:
+            sessionId:
+              type: string
     CreateBeneficiaryRequest:
       type: object
       required:

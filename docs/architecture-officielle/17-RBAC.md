@@ -28,3 +28,9 @@ Ce document appartient au corpus officiel Hope House Platform. Il est obligatoir
 
 Moteur universel, configuration dynamique, wallets numériques, RBAC configurable, connecteurs indépendants, audit complet et compatibilité ascendante sont obligatoires.
 
+
+## Sécurité et permissions configurables
+
+Les opérations d'authentification et de sécurité sensibles doivent être liées à des permissions configurables côté serveur. Le Lot 1 ne crée pas de permissions codées en dur dans le code applicatif. Les familles de permissions à prévoir couvrent la consultation des sessions, la révocation des sessions, la gestion des appareils, la consultation des événements sécurité, le déblocage de compte, la révocation administrative, le paramétrage 2FA, la modification de `app_settings` et Login As.
+
+Toute action administrative de sécurité exige une permission configurable, une justification lorsque l'action est sensible, et un audit complet. Les rôles de référence ne sont pas des contraintes définitives codées dans l'application.

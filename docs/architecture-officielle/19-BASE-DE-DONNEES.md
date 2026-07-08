@@ -67,3 +67,51 @@ Sécurité : device_fingerprints, login_attempts, login_sessions, security_event
 Marketplace : accessory_products, central_stock_movements, agent_stock_items, agent_shop_products, accessory_orders, deliveries. Règles : Hope House fournisseur officiel, stock central, stock Agent, prix achat, prix vente, bénéfice.
 
 Engagement : loyalty_accounts, loyalty_transactions, referral_codes, referral_rewards, promotions, bonus_rules. Règles : calcul configurable, expiration, anti-fraude, audit.
+
+## Tables Authentification & Sécurité — Lot 1 contractuel
+
+Le Lot 1 ajoute au schéma conceptuel les tables nécessaires à l'authentification et à la sécurité, sans migration de production ni client Prisma runtime. PostgreSQL reste la cible; Prisma ORM sera introduit progressivement dans un lot ultérieur avec migrations versionnées compatibles expand/contract.
+
+### app_settings
+
+`app_settings` est la source unique des paramètres configurables, y compris les politiques de sécurité. Elle évite la création d'une table `security_policies` séparée. Les paramètres sont identifiés par namespace, clé, scope, statut, période de validité, valeur JSON, auteur de création/modification et métadonnées.
+
+### auth_credentials
+
+Stocke les secrets d'authentification sous forme hashée uniquement. Aucun mot de passe, token ou secret ne doit être conservé en clair. Les statuts couvrent actif, désactivé, rotation et archivage.
+
+### device_fingerprints
+
+Journal des appareils par utilisateur. Le fingerprint stocké est une empreinte hashée. Les statuts couvrent pending, trusted, untrusted, revoked et archived.
+
+### login_sessions
+
+Sessions révocables liées à un utilisateur et éventuellement à un appareil. Les sessions possèdent statut, émission, expiration absolue, expiration d'inactivité, dernière activité et informations de révocation.
+
+### session_refresh_tokens
+
+Historique des refresh tokens rotatifs. Seule l'empreinte hashée du token est stockée. Les statuts couvrent active, rotated, revoked, expired et reused afin de détecter les réutilisations suspectes.
+
+### login_attempts
+
+Journal des tentatives de connexion. Il conserve identifiant hashé, utilisateur si connu, appareil si connu, IP hashée si disponible, résultat, motif d'échec, date et métadonnées.
+
+### security_events
+
+Événements sécurité append-only : connexions, échecs, blocages, déblocages, appareils, 2FA, reset, révocations et Login As. Les niveaux de gravité sont info, medium, major et critical.
+
+### password_reset_requests
+
+Demandes de réinitialisation de mot de passe avec token hashé, statut, expiration et date de complétion. Les réponses API restent neutres pour limiter l'énumération de comptes.
+
+### two_factor_settings et two_factor_challenges
+
+`two_factor_settings` décrit les règles 2FA configurables par scope. `two_factor_challenges` journalise les challenges émis, leur méthode, statut, compteur de tentatives et expiration.
+
+### admin_access_logs
+
+Journalise les accès administratifs sensibles, notamment Login As, avec acteur, cible, justification, session liée, début, fin et métadonnées.
+
+### Prisma et Neon PostgreSQL
+
+Prisma ORM est la cible de modélisation et de migrations versionnées. Neon est uniquement un fournisseur PostgreSQL. La logique métier ne dépend jamais de Neon. Les migrations devront être additives, testées avant production et compatibles avec une stratégie expand/contract.
