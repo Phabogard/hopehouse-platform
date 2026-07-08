@@ -218,6 +218,157 @@ CREATE TABLE commission_rules (
   updated_at TEXT NOT NULL
 );
 
+
+-- Paramètres configurables globaux et politiques transverses.
+-- app_settings est la source unique des paramètres configurables, y compris les politiques de sécurité.
+CREATE TABLE app_settings (
+  id TEXT PRIMARY KEY,
+  namespace TEXT NOT NULL,
+  key TEXT NOT NULL,
+  scope_type TEXT NOT NULL,
+  scope_id TEXT,
+  status TEXT NOT NULL CHECK (status IN ('draft', 'active', 'archived')),
+  value_json TEXT NOT NULL,
+  starts_at TEXT,
+  ends_at TEXT,
+  created_by_user_id TEXT REFERENCES users(id),
+  updated_by_user_id TEXT REFERENCES users(id),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  metadata_json TEXT NOT NULL,
+  UNIQUE (namespace, key, scope_type, scope_id, status)
+);
+
+CREATE TABLE auth_credentials (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id),
+  credential_type TEXT NOT NULL,
+  credential_hash TEXT NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('active', 'disabled', 'rotated', 'archived')),
+  last_changed_at TEXT NOT NULL,
+  must_rotate_at TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  metadata_json TEXT NOT NULL
+);
+
+CREATE TABLE device_fingerprints (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id),
+  fingerprint_hash TEXT NOT NULL,
+  label TEXT,
+  status TEXT NOT NULL CHECK (status IN ('pending', 'trusted', 'untrusted', 'revoked', 'archived')),
+  first_seen_at TEXT NOT NULL,
+  last_seen_at TEXT NOT NULL,
+  revoked_at TEXT,
+  revoked_by_user_id TEXT REFERENCES users(id),
+  metadata_json TEXT NOT NULL,
+  UNIQUE (user_id, fingerprint_hash)
+);
+
+CREATE TABLE login_sessions (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id),
+  device_fingerprint_id TEXT REFERENCES device_fingerprints(id),
+  status TEXT NOT NULL CHECK (status IN ('active', 'revoked', 'expired', 'archived')),
+  issued_at TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  idle_expires_at TEXT,
+  last_seen_at TEXT,
+  revoked_at TEXT,
+  revoked_by_user_id TEXT REFERENCES users(id),
+  revocation_reason TEXT,
+  metadata_json TEXT NOT NULL
+);
+
+CREATE TABLE session_refresh_tokens (
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL REFERENCES login_sessions(id),
+  token_hash TEXT NOT NULL UNIQUE,
+  status TEXT NOT NULL CHECK (status IN ('active', 'rotated', 'revoked', 'expired', 'reused')),
+  issued_at TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  rotated_at TEXT,
+  revoked_at TEXT,
+  replaced_by_token_id TEXT REFERENCES session_refresh_tokens(id),
+  metadata_json TEXT NOT NULL
+);
+
+CREATE TABLE login_attempts (
+  id TEXT PRIMARY KEY,
+  user_id TEXT REFERENCES users(id),
+  identifier_hash TEXT NOT NULL,
+  device_fingerprint_id TEXT REFERENCES device_fingerprints(id),
+  ip_address_hash TEXT,
+  outcome TEXT NOT NULL CHECK (outcome IN ('succeeded', 'failed', 'blocked')),
+  failure_reason TEXT,
+  occurred_at TEXT NOT NULL,
+  metadata_json TEXT NOT NULL
+);
+
+CREATE TABLE security_events (
+  id TEXT PRIMARY KEY,
+  user_id TEXT REFERENCES users(id),
+  actor_user_id TEXT REFERENCES users(id),
+  event_type TEXT NOT NULL,
+  severity TEXT NOT NULL CHECK (severity IN ('info', 'medium', 'major', 'critical')),
+  related_entity_type TEXT,
+  related_entity_id TEXT,
+  occurred_at TEXT NOT NULL,
+  metadata_json TEXT NOT NULL
+);
+
+CREATE TABLE password_reset_requests (
+  id TEXT PRIMARY KEY,
+  user_id TEXT REFERENCES users(id),
+  identifier_hash TEXT NOT NULL,
+  token_hash TEXT NOT NULL UNIQUE,
+  status TEXT NOT NULL CHECK (status IN ('pending', 'completed', 'expired', 'revoked')),
+  expires_at TEXT NOT NULL,
+  completed_at TEXT,
+  created_at TEXT NOT NULL,
+  metadata_json TEXT NOT NULL
+);
+
+CREATE TABLE two_factor_settings (
+  id TEXT PRIMARY KEY,
+  scope_type TEXT NOT NULL,
+  scope_id TEXT,
+  method TEXT NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('active', 'inactive', 'archived')),
+  configuration_json TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  metadata_json TEXT NOT NULL
+);
+
+CREATE TABLE two_factor_challenges (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id),
+  session_id TEXT REFERENCES login_sessions(id),
+  action TEXT NOT NULL,
+  method TEXT NOT NULL,
+  challenge_hash TEXT,
+  status TEXT NOT NULL CHECK (status IN ('pending', 'succeeded', 'failed', 'expired')),
+  attempt_count INTEGER NOT NULL CHECK (attempt_count >= 0),
+  expires_at TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  metadata_json TEXT NOT NULL
+);
+
+CREATE TABLE admin_access_logs (
+  id TEXT PRIMARY KEY,
+  actor_user_id TEXT NOT NULL REFERENCES users(id),
+  target_user_id TEXT REFERENCES users(id),
+  action TEXT NOT NULL,
+  reason TEXT NOT NULL,
+  session_id TEXT REFERENCES login_sessions(id),
+  started_at TEXT NOT NULL,
+  ended_at TEXT,
+  metadata_json TEXT NOT NULL
+);
+
 CREATE TABLE wallets (
   id TEXT PRIMARY KEY,
   owner_type TEXT NOT NULL,

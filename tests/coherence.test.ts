@@ -171,3 +171,88 @@ test('SQL status constraints include the statuses emitted by domain factories', 
   assert.equal(schema.includes("status IN ('initiated', 'pending', 'succeeded', 'failed', 'cancelled', 'refunded', 'partially_refunded', 'reconciled')"), true);
   assert.equal(schema.includes("status IN ('draft', 'issued', 'partially_paid', 'paid', 'cancelled', 'overdue', 'archived')"), true);
 });
+test('OpenAPI documents the Authentification and Security Lot 1 contract', () => {
+  const openApi = readProjectFile('docs/api/openapi.yaml');
+
+  for (const requiredFragment of [
+    'openapi: 3.1.0',
+    'version: 0.2.0',
+    '/auth/login:',
+    '/auth/refresh:',
+    '/auth/logout:',
+    '/auth/password-reset/request:',
+    '/auth/password-reset/confirm:',
+    '/auth/2fa/challenges/{challengeId}/verify:',
+    '/auth/sessions:',
+    '/security/devices:',
+    '/security/events:',
+    '/admin/security/login-attempts:',
+    '/admin/security/sessions:',
+    '/admin/security/users/{userId}/unlock:',
+    '/admin/security/users/{userId}/revoke-sessions:',
+    '/admin/security/users/{userId}/revoke-devices:',
+    '/admin/login-as:',
+    'ErrorResponse:',
+    'LoginRequest:',
+    'RefreshTokenRequest:',
+    'SessionResponse:',
+    'DeviceResponse:',
+    'SecurityEventResponse:',
+    'rotation obligatoire',
+    "empreinte hashée",
+    'révocable globalement ou par appareil',
+  ]) {
+    assert.equal(openApi.includes(requiredFragment), true, requiredFragment);
+  }
+});
+
+test('SQL documents configurable auth security tables without duplicating security policies', () => {
+  const schema = readProjectFile('database/schema.sql');
+
+  for (const table of [
+    'app_settings',
+    'auth_credentials',
+    'device_fingerprints',
+    'login_sessions',
+    'session_refresh_tokens',
+    'login_attempts',
+    'security_events',
+    'password_reset_requests',
+    'two_factor_settings',
+    'two_factor_challenges',
+    'admin_access_logs',
+  ]) {
+    assert.equal(schema.includes(`CREATE TABLE ${table}`), true, table);
+  }
+
+  assert.equal(schema.includes('CREATE TABLE security_policies'), false);
+  assert.equal(schema.includes('token_hash TEXT NOT NULL UNIQUE'), true);
+  assert.equal(schema.includes('fingerprint_hash TEXT NOT NULL'), true);
+  assert.equal(schema.includes("status TEXT NOT NULL CHECK (status IN ('active', 'rotated', 'revoked', 'expired', 'reused'))"), true);
+});
+
+test('official docs keep auth security policies configurable through app settings', () => {
+  const documents = [
+    'docs/architecture-officielle/16-SECURITE.md',
+    'docs/architecture-officielle/17-RBAC.md',
+    'docs/architecture-officielle/19-BASE-DE-DONNEES.md',
+    'docs/architecture-officielle/20-API.md',
+    'docs/architecture-officielle/22-TESTS.md',
+    'docs/architecture-officielle/23-DEPLOIEMENT.md',
+  ].map(readProjectFile).join('\n');
+
+  for (const requiredConcept of [
+    'app_settings',
+    'source unique des paramètres configurables',
+    'refresh tokens sont rotatifs',
+    'empreinte hashée',
+    'révocation globale',
+    'révocation par appareil',
+    'Prisma ORM',
+    'Neon PostgreSQL',
+    'ne dépend jamais de Neon',
+    'OpenAPI reste en version 3.1.0',
+  ]) {
+    assert.equal(documents.includes(requiredConcept), true, requiredConcept);
+  }
+});

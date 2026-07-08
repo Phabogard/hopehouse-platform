@@ -36,3 +36,39 @@ Ce document appartient au corpus officiel Hope House Platform. Il est obligatoir
 
 Moteur universel, configuration dynamique, wallets numériques, RBAC configurable, connecteurs indépendants, audit complet et compatibilité ascendante sont obligatoires.
 
+
+## Architecture Authentification & Sécurité — Lot 1 contractuel
+
+Le Lot 1 documente le contrat et le modèle cible sans implémenter de code métier, middleware, logique JWT, intégration Prisma runtime, connexion Neon ou dépendance supplémentaire. Les routes et tables décrites deviennent des références contractuelles pour une implémentation ultérieure validée.
+
+### Paramètres configurables
+
+Tous les paramètres de sécurité sont administrés via `app_settings`, source unique des paramètres configurables. Aucune table `security_policies` séparée n'est créée afin d'éviter la duplication. Les valeurs comme durée d'access token, durée de refresh token, seuil de blocage, délai de blocage, expiration de challenge 2FA et règles de révocation sont des paramètres configurables, pas des constantes métier codées en dur.
+
+### Cycle d'authentification cible
+
+1. L'utilisateur soumet identifiant, secret et contexte appareil.
+2. Le système vérifie les règles configurées dans `app_settings`.
+3. Les tentatives sont journalisées dans `login_attempts`.
+4. L'appareil est rapproché de `device_fingerprints`.
+5. Si la politique configurable l'exige, un challenge 2FA est créé.
+6. En succès, une session révocable est créée dans `login_sessions`.
+7. Un access token court est émis et un refresh token rotatif est remis au client.
+8. Le refresh token est stocké côté serveur uniquement sous forme d'empreinte hashée dans `session_refresh_tokens`.
+9. Les événements sensibles sont enregistrés dans `security_events` et auditables via `audit_logs`.
+
+### Cycle des refresh tokens
+
+Les refresh tokens sont obligatoirement rotatifs. À chaque rafraîchissement accepté, le refresh token précédent est marqué comme `rotated`, un nouveau refresh token est émis et seule son empreinte hashée est conservée. La réutilisation d'un refresh token déjà remplacé est un événement critique et entraîne la révocation configurable de la session ou de la famille de tokens. La révocation peut être globale, par session ou par appareil.
+
+### Révocation globale et révocation par appareil
+
+La révocation globale invalide toutes les sessions actives d'un utilisateur selon une règle configurée. La révocation par appareil invalide les sessions liées à un `device_fingerprint_id`. Les actions administratives de révocation exigent justification, permissions configurables et audit.
+
+### Durées documentées comme valeurs configurables
+
+Les valeurs de référence sont : access token 15 minutes, refresh token 30 jours, expiration d'inactivité 7 jours, expiration absolue de session 30 jours, challenge 2FA 5 minutes et token de réinitialisation 15 minutes. Ces valeurs sont des paramètres `app_settings` modifiables; elles ne doivent pas être codées en dur dans la logique métier.
+
+### Prisma et Neon PostgreSQL
+
+PostgreSQL reste la cible de persistance. Prisma ORM et Neon PostgreSQL sont documentés comme architecture cible de persistance : Prisma pour le modèle et les migrations versionnées, Neon uniquement comme fournisseur PostgreSQL. Aucun domaine métier ne dépend de Neon. Les secrets, URL de connexion, clés JWT, paramètres 2FA et chaînes de connexion ne sont jamais versionnés.
