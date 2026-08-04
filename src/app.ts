@@ -9,6 +9,7 @@ import { authorize, type Actor } from './modules/rbac/authorize.js';
 import { createServiceOffering } from './modules/services/services.js';
 import { createSubscription } from './modules/subscriptions/subscriptions.js';
 import { createUser } from './modules/users/users.js';
+import { AuthRuntimeContext, type AuthRuntimeOptions } from './modules/auth-security/index.js';
 
 const audit = new AuditLogService();
 const orderEngine = new OrderEngine();
@@ -26,6 +27,10 @@ interface SensitiveAuditContext {
   actorUserId: string;
   action: string;
   entityType: string;
+}
+
+export interface HopeHouseServerOptions {
+  readonly auth?: AuthRuntimeOptions;
 }
 
 function sendJson(response: ServerResponse, statusCode: number, body: unknown): void {
@@ -69,6 +74,22 @@ function orderStepField(body: JsonObject, fieldName: string): OrderStep {
   const value = stringField(body, fieldName);
   if (!(orderCycle as readonly string[]).includes(value)) throw new ValidationError(`Le champ ${fieldName} est invalide`);
   return value as OrderStep;
+}
+
+function optionalDeviceContext(body: JsonObject): { fingerprint?: string | null; userAgent?: string | null; ipAddress?: string | null; metadata?: Record<string, unknown> } | null {
+  const device = optionalObjectField(body, 'device');
+  if (device === null) return null;
+  return {
+    fingerprint: optionalStringField(device, 'fingerprint'),
+    userAgent: optionalStringField(device, 'userAgent'),
+    ipAddress: optionalStringField(device, 'ipAddress'),
+    metadata: optionalObjectField(device, 'metadata') ?? undefined,
+  };
+}
+
+function requireAuthContext(auth: AuthRuntimeContext | null): AuthRuntimeContext {
+  if (auth === null) throw new ValidationError('Le contexte d’authentification doit être configuré');
+  return auth;
 }
 
 function sensitiveAuditContext(method: string | undefined, pathname: string): SensitiveAuditContext | null {
@@ -123,7 +144,9 @@ function readJsonBody(request: IncomingMessage): Promise<JsonObject> {
   });
 }
 
-export function createHopeHouseServer() {
+export function createHopeHouseServer(options: HopeHouseServerOptions = {}) {
+  const auth = options.auth === undefined && process.env.HOPEHOUSE_JWT_SECRET === undefined ? null : new AuthRuntimeContext(options.auth);
+
   return createServer(async (request: IncomingMessage, response: ServerResponse) => {
     const url = new URL(request.url ?? '/', 'http://localhost');
 
@@ -135,6 +158,18 @@ export function createHopeHouseServer() {
     }
 
     try {
+
+      if (request.method === 'POST' && url.pathname === '/auth/login') {
+        const body = await readJsonBody(request);
+        const login = await requireAuthContext(auth).login({
+          identifier: stringField(body, 'identifier'),
+          password: stringField(body, 'password'),
+          device: optionalDeviceContext(body),
+          metadata: optionalObjectField(body, 'metadata') ?? undefined,
+        });
+        sendJson(response, 200, { data: login });
+        return;
+      }
 
       if (request.method === 'POST' && url.pathname === '/orders') {
         const body = await readJsonBody(request);
