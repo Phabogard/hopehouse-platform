@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createHopeHouseServer } from '../src/app.js';
 
-async function withServer<T>(run: (baseUrl: string) => Promise<T>): Promise<T> {
-  const server = createHopeHouseServer();
+async function withServer<T>(run: (baseUrl: string) => Promise<T>, options?: Parameters<typeof createHopeHouseServer>[0]): Promise<T> {
+  const server = createHopeHouseServer(options);
   await new Promise<void>((resolve) => server.listen(0, resolve));
   const address = server.address();
   if (typeof address !== 'object' || address === null) throw new Error('Adresse serveur invalide');
@@ -14,6 +14,48 @@ async function withServer<T>(run: (baseUrl: string) => Promise<T>): Promise<T> {
     await new Promise<void>((resolve) => server.close(resolve));
   }
 }
+
+
+test('POST /auth/login returns a signed access token, refresh token, and revocable session', async () => {
+  await withServer(async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/auth/login`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        identifier: 'admin@hopehouse.local',
+        password: 'test-password',
+        device: { fingerprint: 'api-device-1', ipAddress: '203.0.113.20', metadata: { platform: 'node-test' } },
+      }),
+    });
+    const body = await response.json() as { data: { accessToken: string; refreshToken: string; requiresTwoFactor: boolean; session: { id: string; userId: string; expiresAt: string; idleExpiresAt: string | null } } };
+
+    assert.equal(response.status, 200);
+    assert.equal(body.data.accessToken.split('.').length, 3);
+    assert.equal(typeof body.data.refreshToken, 'string');
+    assert.equal(body.data.requiresTwoFactor, false);
+    assert.equal(body.data.session.userId, 'bootstrap-system-admin');
+  }, { auth: { jwtSecret: 'api-test-jwt-secret', bootstrapPassword: 'test-password' } });
+});
+
+test('POST /auth/login rejects invalid credentials and requires configured auth context', async () => {
+  await withServer(async (baseUrl) => {
+    const invalidResponse = await fetch(`${baseUrl}/auth/login`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ identifier: 'admin@hopehouse.local', password: 'wrong-password' }),
+    });
+    assert.equal(invalidResponse.status, 403);
+  }, { auth: { jwtSecret: 'api-test-jwt-secret', bootstrapPassword: 'test-password' } });
+
+  await withServer(async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/auth/login`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ identifier: 'admin@hopehouse.local', password: 'test-password' }),
+    });
+    assert.equal(response.status, 422);
+  });
+});
 
 test('POST /beneficiaries creates a beneficiary from the documented contract', async () => {
   await withServer(async (baseUrl) => {

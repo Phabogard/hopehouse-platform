@@ -72,3 +72,11 @@ Les valeurs de référence sont : access token 15 minutes, refresh token 30 jour
 ### Prisma et Neon PostgreSQL
 
 PostgreSQL reste la cible de persistance. Prisma ORM et Neon PostgreSQL sont documentés comme architecture cible de persistance : Prisma pour le modèle et les migrations versionnées, Neon uniquement comme fournisseur PostgreSQL. Aucun domaine métier ne dépend de Neon. Les secrets, URL de connexion, clés JWT, paramètres 2FA et chaînes de connexion ne sont jamais versionnés.
+
+## Implémentation Phase 1A — Authentification JWT et sessions
+
+La Phase 1A implémente un premier socle runtime sans attendre la persistance PostgreSQL de la Phase 2. Elle introduit l'émission et la vérification d'access tokens signés, la création de sessions révocables via le module `auth-security`, l'émission de refresh tokens par le service existant et l'endpoint `POST /auth/login`.
+
+Les repositories utilisés par cette phase sont volontairement in-memory et transitoires. Ils implémentent les interfaces du module `auth-security` afin d'être remplacés par des repositories PostgreSQL lors de la Phase 2 sans modifier la logique métier. Les secrets JWT et le mot de passe bootstrap doivent être fournis par configuration ou injection de test; aucun secret de production ne doit être versionné.
+
+Le RBAC reste statique pendant cette phase et sera remplacé par le RBAC dynamique en Phase 4. Les acteurs de démonstration restent uniquement pour les routes non encore migrées; leur suppression définitive est prévue en Phase 1D.

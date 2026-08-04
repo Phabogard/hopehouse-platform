@@ -1,5 +1,9 @@
 declare module 'node:crypto' {
   export function randomUUID(): string;
+  export function randomBytes(size: number): { toString(encoding: 'base64url' | 'hex'): string };
+  export function createHash(algorithm: string): { update(data: string): { digest(encoding: 'hex' | 'base64url'): string } };
+  export function createHmac(algorithm: string, key: string): { update(data: string): { digest(encoding: 'hex' | 'base64url'): string } };
+  export function timingSafeEqual(left: Buffer, right: Buffer): boolean;
 }
 
 declare module 'node:fs' {
@@ -46,8 +50,11 @@ declare module 'node:test' {
 }
 
 declare class Buffer {
-  toString(): string;
+  constructor(value: string, encoding?: string);
+  readonly length: number;
+  toString(encoding?: string): string;
   static byteLength(value: string): number;
+  static from(value: string, encoding?: string): Buffer;
 }
 
 declare const process: {
