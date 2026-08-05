@@ -12,6 +12,7 @@ declare module 'node:fs' {
 
 declare module 'node:http' {
   export interface IncomingMessage {
+    headers: Record<string, string | undefined>;
     url?: string;
     method?: string;
     on(event: 'data', listener: (chunk: string | Buffer) => void): void;

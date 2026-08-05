@@ -1,5 +1,5 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
-import { ValidationError } from './core/errors.js';
+import { ForbiddenError, UnauthorizedError, ValidationError } from './core/errors.js';
 import { AuditLogService } from './modules/audit/audit-log.js';
 import { createBeneficiary } from './modules/beneficiaries/beneficiaries.js';
 import { createInvoice } from './modules/invoices/invoices.js';
@@ -15,10 +15,6 @@ const audit = new AuditLogService();
 const orderEngine = new OrderEngine();
 const orders = new Map<string, Order>();
 
-const demoReadActor: Actor = { id: 'system', role: 'system_admin' };
-const demoBeneficiaryWriteActor: Actor = { id: 'business-demo', role: 'business_admin' };
-const demoPaymentWriteActor: Actor = { id: 'finance-demo', role: 'finance_manager' };
-const demoOrderActor = { id: 'order-demo' };
 const maxJsonBodyBytes = 1_000_000;
 
 type JsonObject = Record<string, unknown>;
@@ -92,21 +88,58 @@ function requireAuthContext(auth: AuthRuntimeContext | null): AuthRuntimeContext
   return auth;
 }
 
-function sensitiveAuditContext(method: string | undefined, pathname: string): SensitiveAuditContext | null {
+function bearerToken(request: IncomingMessage): string {
+  const header = request.headers.authorization;
+  if (header === undefined) throw new UnauthorizedError();
+  const [scheme, token, extra] = header.split(' ');
+  if (scheme !== 'Bearer' || token === undefined || token.trim().length === 0 || extra !== undefined) {
+    throw new UnauthorizedError('Authorization Bearer invalide');
+  }
+  return token;
+}
+
+async function authenticatedActor(auth: AuthRuntimeContext | null, request: IncomingMessage): Promise<Actor> {
+  if (auth === null) throw new UnauthorizedError('Authentification non configurée');
+  try {
+    const actor = await auth.authenticateAccessToken(bearerToken(request));
+    return { id: actor.id, role: actor.role };
+  } catch (error) {
+    if (error instanceof ForbiddenError) throw new UnauthorizedError(error.message);
+    throw error;
+  }
+}
+
+
+function requireAuthenticatedActor(actor: Actor | null): Actor {
+  if (actor === null) throw new UnauthorizedError();
+  return actor;
+}
+
+function isProtectedRoute(method: string | undefined, pathname: string): boolean {
+  if (method === 'POST' && pathname === '/orders') return true;
+  if (method === 'POST' && pathname.match(/^\/orders\/[^/]+\/transitions$/) !== null) return true;
+  if (method === 'GET' && ['/users', '/beneficiaries', '/services', '/subscriptions', '/payments', '/invoices', '/audit-logs'].includes(pathname)) return true;
+  if (method === 'POST' && ['/beneficiaries', '/payments'].includes(pathname)) return true;
+  return false;
+}
+
+function sensitiveAuditContext(method: string | undefined, pathname: string, actor: Actor | null): SensitiveAuditContext | null {
+  if (actor === null) return null;
+
   if (method === 'POST' && pathname === '/beneficiaries') {
-    return { actorUserId: demoBeneficiaryWriteActor.id, action: 'beneficiary.create', entityType: 'beneficiary' };
+    return { actorUserId: actor.id, action: 'beneficiary.create', entityType: 'beneficiary' };
   }
 
   if (method === 'POST' && pathname === '/payments') {
-    return { actorUserId: demoPaymentWriteActor.id, action: 'payment.create', entityType: 'payment' };
+    return { actorUserId: actor.id, action: 'payment.create', entityType: 'payment' };
   }
 
   if (method === 'POST' && pathname === '/orders') {
-    return { actorUserId: demoOrderActor.id, action: 'order.create', entityType: 'order' };
+    return { actorUserId: actor.id, action: 'order.create', entityType: 'order' };
   }
 
   if (method === 'POST' && pathname.match(/^\/orders\/[^/]+\/transitions$/) !== null) {
-    return { actorUserId: demoOrderActor.id, action: 'order.transition', entityType: 'order' };
+    return { actorUserId: actor.id, action: 'order.transition', entityType: 'order' };
   }
 
   return null;
@@ -150,7 +183,8 @@ export function createHopeHouseServer(options: HopeHouseServerOptions = {}) {
   return createServer(async (request: IncomingMessage, response: ServerResponse) => {
     const url = new URL(request.url ?? '/', 'http://localhost');
 
-    const auditContext = sensitiveAuditContext(request.method, url.pathname);
+    let actor: Actor | null = null;
+    let auditContext: SensitiveAuditContext | null = null;
 
     if (request.method === 'GET' && url.pathname === '/health') {
       sendJson(response, 200, { data: { status: 'ok', service: 'hopehouse-platform' } });
@@ -171,11 +205,17 @@ export function createHopeHouseServer(options: HopeHouseServerOptions = {}) {
         return;
       }
 
+      if (isProtectedRoute(request.method, url.pathname)) {
+        actor = await authenticatedActor(auth, request);
+        auditContext = sensitiveAuditContext(request.method, url.pathname, actor);
+      }
+
       if (request.method === 'POST' && url.pathname === '/orders') {
+        const currentActor = requireAuthenticatedActor(actor);
         const body = await readJsonBody(request);
         const monetaryIntent = optionalObjectField(body, 'monetaryIntent');
         const order = orderEngine.create({
-          requesterActorId: stringField(body, 'requesterActorId'),
+          requesterActorId: currentActor.id,
           serviceDefinitionId: stringField(body, 'serviceDefinitionId'),
           mode: orderModeField(body, 'mode'),
           beneficiaryId: optionalStringField(body, 'beneficiaryId'),
@@ -189,13 +229,14 @@ export function createHopeHouseServer(options: HopeHouseServerOptions = {}) {
       }
 
       if (request.method === 'POST' && url.pathname.match(/^\/orders\/[^/]+\/transitions$/) !== null) {
+        const currentActor = requireAuthenticatedActor(actor);
         const orderId = url.pathname.split('/')[2];
         const order = orders.get(orderId);
         if (order === undefined) throw new ValidationError('Commande introuvable');
         const body = await readJsonBody(request);
         const advancedOrder = await orderEngine.advance({
           order,
-          actorId: stringField(body, 'actorId'),
+          actorId: currentActor.id,
           toStep: orderStepField(body, 'toStep'),
           metadata: optionalObjectField(body, 'metadata') ?? undefined,
         });
@@ -205,46 +246,53 @@ export function createHopeHouseServer(options: HopeHouseServerOptions = {}) {
       }
 
       if (request.method === 'GET' && url.pathname === '/users') {
-        authorize(demoReadActor, 'users:read');
+        const currentActor = requireAuthenticatedActor(actor);
+        authorize(currentActor, 'users:read');
         sendJson(response, 200, { data: [createUser({ email: 'admin@hopehouse.local', displayName: 'System Admin', role: 'system_admin' })] });
         return;
       }
 
       if (request.method === 'GET' && url.pathname === '/beneficiaries') {
-        authorize(demoReadActor, 'beneficiaries:read');
+        const currentActor = requireAuthenticatedActor(actor);
+        authorize(currentActor, 'beneficiaries:read');
         sendJson(response, 200, { data: [createBeneficiary({ reference: 'BEN-001', displayName: 'Bénéficiaire de démonstration' })] });
         return;
       }
 
       if (request.method === 'POST' && url.pathname === '/beneficiaries') {
-        authorize(demoBeneficiaryWriteActor, 'beneficiaries:manage');
+        const currentActor = requireAuthenticatedActor(actor);
+        authorize(currentActor, 'beneficiaries:manage');
         const body = await readJsonBody(request);
         const beneficiary = createBeneficiary({ reference: stringField(body, 'reference'), displayName: stringField(body, 'displayName') });
-        audit.record({ actorUserId: demoBeneficiaryWriteActor.id, action: 'beneficiary.create', entityType: 'beneficiary', entityId: beneficiary.id, outcome: 'success' });
+        audit.record({ actorUserId: currentActor.id, action: 'beneficiary.create', entityType: 'beneficiary', entityId: beneficiary.id, outcome: 'success' });
         sendJson(response, 201, { data: beneficiary });
         return;
       }
 
       if (request.method === 'GET' && url.pathname === '/services') {
-        authorize(demoReadActor, 'services:read');
+        const currentActor = requireAuthenticatedActor(actor);
+        authorize(currentActor, 'services:read');
         sendJson(response, 200, { data: [createServiceOffering({ name: 'Service de démonstration', isBillable: true })] });
         return;
       }
 
       if (request.method === 'GET' && url.pathname === '/subscriptions') {
-        authorize(demoReadActor, 'subscriptions:read');
+        const currentActor = requireAuthenticatedActor(actor);
+        authorize(currentActor, 'subscriptions:read');
         sendJson(response, 200, { data: [createSubscription({ beneficiaryId: 'BEN-001', serviceId: 'SVC-001', startDate: '2026-01-01' })] });
         return;
       }
 
       if (request.method === 'GET' && url.pathname === '/payments') {
-        authorize(demoReadActor, 'payments:read');
+        const currentActor = requireAuthenticatedActor(actor);
+        authorize(currentActor, 'payments:read');
         sendJson(response, 200, { data: [createPayment({ beneficiaryId: 'BEN-001', amountCents: 10000, currency: 'USD', paymentMethod: 'manual' })] });
         return;
       }
 
       if (request.method === 'POST' && url.pathname === '/payments') {
-        authorize(demoPaymentWriteActor, 'payments:create');
+        const currentActor = requireAuthenticatedActor(actor);
+        authorize(currentActor, 'payments:create');
         const body = await readJsonBody(request);
         const payment = createPayment({
           beneficiaryId: stringField(body, 'beneficiaryId'),
@@ -252,20 +300,22 @@ export function createHopeHouseServer(options: HopeHouseServerOptions = {}) {
           currency: stringField(body, 'currency'),
           paymentMethod: optionalStringField(body, 'paymentMethod'),
         });
-        audit.record({ actorUserId: demoPaymentWriteActor.id, action: 'payment.create', entityType: 'payment', entityId: payment.id, outcome: 'success' });
+        audit.record({ actorUserId: currentActor.id, action: 'payment.create', entityType: 'payment', entityId: payment.id, outcome: 'success' });
         sendJson(response, 201, { data: payment });
         return;
       }
 
       if (request.method === 'GET' && url.pathname === '/invoices') {
-        authorize(demoReadActor, 'invoices:read');
+        const currentActor = requireAuthenticatedActor(actor);
+        authorize(currentActor, 'invoices:read');
         sendJson(response, 200, { data: [createInvoice({ beneficiaryId: 'BEN-001', totalCents: 10000, currency: 'USD' })] });
         return;
       }
 
       if (request.method === 'GET' && url.pathname === '/audit-logs') {
-        authorize(demoReadActor, 'audit:read');
-        audit.record({ actorUserId: demoReadActor.id, action: 'audit.list', entityType: 'audit_log', entityId: 'collection', outcome: 'success' });
+        const currentActor = requireAuthenticatedActor(actor);
+        authorize(currentActor, 'audit:read');
+        audit.record({ actorUserId: currentActor.id, action: 'audit.list', entityType: 'audit_log', entityId: 'collection', outcome: 'success' });
         sendJson(response, 200, { data: audit.list() });
         return;
       }
@@ -286,7 +336,8 @@ export function createHopeHouseServer(options: HopeHouseServerOptions = {}) {
         });
       }
 
-      sendJson(response, statusCode, { error: { message } });
+      const code = typeof error === 'object' && error !== null && 'code' in error ? String(error.code) : 'INTERNAL_ERROR';
+      sendJson(response, statusCode, { error: { code, message } });
     }
   });
 }
