@@ -9,6 +9,12 @@ export class DomainError extends Error {
   }
 }
 
+export class UnauthorizedError extends DomainError {
+  constructor(message = 'Authentification requise') {
+    super(message, 'UNAUTHORIZED', 401);
+  }
+}
+
 export class ForbiddenError extends DomainError {
   constructor(message = 'Action non autorisée') {
     super(message, 'FORBIDDEN', 403);
