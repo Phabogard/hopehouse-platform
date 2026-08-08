@@ -77,6 +77,107 @@ test('POST /auth/login rejects invalid credentials and requires configured auth 
   });
 });
 
+test('createHopeHouseServer uses an injected auth runtime for login and protected routes', async () => {
+  const calls: string[] = [];
+  const authRuntime: NonNullable<Parameters<typeof createHopeHouseServer>[0]>['authRuntime'] = {
+    async login(input) {
+      calls.push(`login:${input.identifier}`);
+      return {
+        accessToken: 'injected-access-token',
+        refreshToken: 'injected-refresh-token',
+        requiresTwoFactor: false,
+        session: { id: 'injected-session', userId: 'injected-user', expiresAt: new Date(Date.now() + 60_000).toISOString(), idleExpiresAt: null },
+        challenge: null,
+      };
+    },
+    async authenticateAccessToken(token) {
+      calls.push(`authenticate:${token}`);
+      return { id: 'injected-user', role: 'system_admin', sessionId: 'injected-session' };
+    },
+  };
+
+  await withServer(async (baseUrl) => {
+    const loginResponse = await fetch(`${baseUrl}/auth/login`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ identifier: 'admin@hopehouse.local', password: 'ignored-by-fake' }),
+    });
+    const loginBody = await loginResponse.json() as { data: { accessToken: string; refreshToken: string; session: { id: string } } };
+
+    assert.equal(loginResponse.status, 200);
+    assert.equal(loginBody.data.accessToken, 'injected-access-token');
+    assert.equal(loginBody.data.refreshToken, 'injected-refresh-token');
+    assert.equal(loginBody.data.session.id, 'injected-session');
+
+    const usersResponse = await fetch(`${baseUrl}/users`, { headers: { authorization: 'Bearer injected-access-token' } });
+    assert.equal(usersResponse.status, 200);
+  }, { authRuntime });
+
+  assert.equal(JSON.stringify(calls), JSON.stringify(['login:admin@hopehouse.local', 'authenticate:injected-access-token']));
+});
+
+test('createHopeHouseServer keeps the in-memory auth runtime when auth options are provided', async () => {
+  await withServer(async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/auth/login`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ identifier: 'admin@hopehouse.local', password: 'test-password' }),
+    });
+    const body = await response.json() as { data: { session: { userId: string } } };
+
+    assert.equal(response.status, 200);
+    assert.equal(body.data.session.userId, 'bootstrap-system-admin');
+  }, authOptions);
+});
+
+test('createHopeHouseServer keeps auth disabled without auth options or injected runtime', async () => {
+  await withServer(async (baseUrl) => {
+    const loginResponse = await fetch(`${baseUrl}/auth/login`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ identifier: 'admin@hopehouse.local', password: 'test-password' }),
+    });
+    assert.equal(loginResponse.status, 422);
+
+    const usersResponse = await fetch(`${baseUrl}/users`);
+    assert.equal(usersResponse.status, 401);
+  });
+});
+
+test('createHopeHouseServer prioritizes an injected auth runtime over auth options', async () => {
+  let loginCalled = false;
+  const authRuntime: NonNullable<Parameters<typeof createHopeHouseServer>[0]>['authRuntime'] = {
+    async login() {
+      loginCalled = true;
+      return {
+        accessToken: 'priority-access-token',
+        refreshToken: null,
+        requiresTwoFactor: false,
+        session: { id: 'priority-session', userId: 'priority-user', expiresAt: new Date(Date.now() + 60_000).toISOString(), idleExpiresAt: null },
+        challenge: null,
+      };
+    },
+    async authenticateAccessToken() {
+      return { id: 'priority-user', role: 'system_admin', sessionId: 'priority-session' };
+    },
+  };
+
+  await withServer(async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/auth/login`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ identifier: 'admin@hopehouse.local', password: 'priority-password' }),
+    });
+    const body = await response.json() as { data: { accessToken: string; session: { userId: string } } };
+
+    assert.equal(response.status, 200);
+    assert.equal(body.data.accessToken, 'priority-access-token');
+    assert.equal(body.data.session.userId, 'priority-user');
+  }, { auth: { jwtSecret: 'priority-secret' }, authRuntime });
+
+  assert.equal(loginCalled, true);
+});
+
 test('protected business routes require a Bearer access token', async () => {
   await withServer(async (baseUrl) => {
     for (const path of ['/users', '/beneficiaries', '/services', '/subscriptions', '/payments', '/invoices', '/audit-logs']) {
