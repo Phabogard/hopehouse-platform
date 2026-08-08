@@ -9,7 +9,7 @@ import { authorize, type Actor } from './modules/rbac/authorize.js';
 import { createServiceOffering } from './modules/services/services.js';
 import { createSubscription } from './modules/subscriptions/subscriptions.js';
 import { createUser } from './modules/users/users.js';
-import { AuthRuntimeContext, type AuthRuntimeOptions } from './modules/auth-security/index.js';
+import { AuthRuntimeContext, type AuthenticatedActor, type AuthenticatedLoginResult, type AuthRuntimeOptions } from './modules/auth-security/index.js';
 
 const audit = new AuditLogService();
 const orderEngine = new OrderEngine();
@@ -25,8 +25,19 @@ interface SensitiveAuditContext {
   entityType: string;
 }
 
+type AuthRuntime = {
+  login(input: {
+    identifier: string;
+    password: string;
+    device?: { fingerprint?: string | null; userAgent?: string | null; ipAddress?: string | null; metadata?: Record<string, unknown> } | null;
+    metadata?: Record<string, unknown>;
+  }): Promise<AuthenticatedLoginResult>;
+  authenticateAccessToken(token: string): Promise<AuthenticatedActor>;
+};
+
 export interface HopeHouseServerOptions {
   readonly auth?: AuthRuntimeOptions;
+  readonly authRuntime?: AuthRuntime | null;
 }
 
 function sendJson(response: ServerResponse, statusCode: number, body: unknown): void {
@@ -83,7 +94,7 @@ function optionalDeviceContext(body: JsonObject): { fingerprint?: string | null;
   };
 }
 
-function requireAuthContext(auth: AuthRuntimeContext | null): AuthRuntimeContext {
+function requireAuthContext(auth: AuthRuntime | null): AuthRuntime {
   if (auth === null) throw new ValidationError('Le contexte d’authentification doit être configuré');
   return auth;
 }
@@ -98,7 +109,7 @@ function bearerToken(request: IncomingMessage): string {
   return token;
 }
 
-async function authenticatedActor(auth: AuthRuntimeContext | null, request: IncomingMessage): Promise<Actor> {
+async function authenticatedActor(auth: AuthRuntime | null, request: IncomingMessage): Promise<Actor> {
   if (auth === null) throw new UnauthorizedError('Authentification non configurée');
   try {
     const actor = await auth.authenticateAccessToken(bearerToken(request));
@@ -178,7 +189,9 @@ function readJsonBody(request: IncomingMessage): Promise<JsonObject> {
 }
 
 export function createHopeHouseServer(options: HopeHouseServerOptions = {}) {
-  const auth = options.auth === undefined && process.env.HOPEHOUSE_JWT_SECRET === undefined ? null : new AuthRuntimeContext(options.auth);
+  const auth = options.authRuntime !== undefined
+    ? options.authRuntime
+    : options.auth === undefined && process.env.HOPEHOUSE_JWT_SECRET === undefined ? null : new AuthRuntimeContext(options.auth);
 
   return createServer(async (request: IncomingMessage, response: ServerResponse) => {
     const url = new URL(request.url ?? '/', 'http://localhost');
