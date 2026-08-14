@@ -81,3 +81,15 @@ test('PrismaAppSettingRepository preserves ConfigurationService behavior against
     JSON.stringify(await memoryService.resolve({ namespace: 'catalogues', key: 'service-definitions', scope: { type: 'global', id: null } })),
   );
 });
+
+test('Prisma auth runtime policy resolver reads active global app_settings through ConfigurationService', async () => {
+  const { resolvePrismaAuthSecurityPolicy } = await import('../src/infrastructure/prisma/auth-runtime.js');
+  const client = new FakeAppSettingClient([
+    record({ id: 'auth-policy', namespace: 'auth-security', key: 'runtime-policy', value: { requireTwoFactor: true, accessTokenTtlMs: 600_000 } }),
+  ]);
+
+  const policy = await resolvePrismaAuthSecurityPolicy(client as never);
+
+  assert.equal(policy.requireTwoFactor, true);
+  assert.equal(policy.accessTokenTtlMs, 600_000);
+});
