@@ -24,6 +24,7 @@ export type Role =
   | 'business_admin'
   | 'operations_agent'
   | 'finance_manager'
+  | 'client'
   | 'accountant'
   | 'auditor';
 
@@ -32,6 +33,7 @@ export const rolePermissions: Record<Role, readonly Permission[]> = {
   business_admin: ['users:read', 'beneficiaries:read', 'beneficiaries:manage', 'services:read', 'services:manage', 'subscriptions:read', 'subscriptions:manage', 'payments:read', 'payments:create', 'invoices:read'],
   operations_agent: ['beneficiaries:read', 'beneficiaries:manage', 'services:read', 'subscriptions:read', 'subscriptions:manage', 'payments:read', 'payments:create', 'invoices:read'],
   finance_manager: ['beneficiaries:read', 'services:read', 'subscriptions:read', 'payments:read', 'payments:create', 'payments:validate', 'invoices:read', 'invoices:manage', 'accounting:export'],
+  client: [],
   accountant: ['payments:read', 'invoices:read', 'accounting:export'],
   auditor: ['audit:read'],
 };

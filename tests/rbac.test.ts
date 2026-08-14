@@ -9,6 +9,7 @@ const expectedRolePermissions: Record<Role, readonly Permission[]> = {
   business_admin: ['users:read', 'beneficiaries:read', 'beneficiaries:manage', 'services:read', 'services:manage', 'subscriptions:read', 'subscriptions:manage', 'payments:read', 'payments:create', 'invoices:read'],
   operations_agent: ['beneficiaries:read', 'beneficiaries:manage', 'services:read', 'subscriptions:read', 'subscriptions:manage', 'payments:read', 'payments:create', 'invoices:read'],
   finance_manager: ['beneficiaries:read', 'services:read', 'subscriptions:read', 'payments:read', 'payments:create', 'payments:validate', 'invoices:read', 'invoices:manage', 'accounting:export'],
+  client: [],
   accountant: ['payments:read', 'invoices:read', 'accounting:export'],
   auditor: ['audit:read'],
 };
@@ -48,4 +49,19 @@ test('forbidden authorization errors use the domain forbidden status code', () =
   }
 
   throw new Error('Expected authorization to fail');
+});
+
+test('official client role has no administrative, accounting, or global audit permissions', () => {
+  assert.equal(can({ id: 'client-1', role: 'client' }, 'users:read'), false);
+  assert.equal(can({ id: 'client-1', role: 'client' }, 'roles:manage'), false);
+  assert.equal(can({ id: 'client-1', role: 'client' }, 'payments:validate'), false);
+  assert.equal(can({ id: 'client-1', role: 'client' }, 'accounting:export'), false);
+  assert.equal(can({ id: 'client-1', role: 'client' }, 'audit:read'), false);
+  assert.throws(() => authorize({ id: 'client-1', role: 'client' }, 'audit:read'), /Permission requise/);
+});
+
+test('agent, accountant, and auditor cannot manage RBAC permissions', () => {
+  assert.throws(() => authorize({ id: 'agent-1', role: 'operations_agent' }, 'roles:manage'), /Permission requise/);
+  assert.throws(() => authorize({ id: 'accountant-1', role: 'accountant' }, 'roles:manage'), /Permission requise/);
+  assert.throws(() => authorize({ id: 'auditor-1', role: 'auditor' }, 'roles:manage'), /Permission requise/);
 });
