@@ -342,3 +342,75 @@ test('POST /orders/{orderId}/transitions advances only to the next official step
     assert.equal(advanced.data.transitions[1]?.toStep, 'validation');
   }, authOptions);
 });
+
+function authRuntimeForRole(role: 'system_admin' | 'business_admin' | 'operations_agent' | 'finance_manager' | 'client' | 'accountant' | 'auditor'): NonNullable<Parameters<typeof createHopeHouseServer>[0]>['authRuntime'] {
+  return {
+    async login() {
+      return {
+        accessToken: `${role}-access-token`,
+        refreshToken: `${role}-refresh-token`,
+        requiresTwoFactor: false,
+        session: { id: `${role}-session`, userId: `${role}-user`, expiresAt: new Date(Date.now() + 60_000).toISOString(), idleExpiresAt: null },
+        challenge: null,
+      };
+    },
+    async authenticateAccessToken() {
+      return { id: `${role}-user`, role, sessionId: `${role}-session` };
+    },
+  };
+}
+
+test('client authenticated actor can create only its own generic order and cannot spoof actor role from HTTP body', async () => {
+  await withServer(async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/orders`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: 'Bearer client-access-token' },
+      body: JSON.stringify({ requesterActorId: 'spoofed-admin', role: 'system_admin', serviceDefinitionId: 'configured-service', mode: 'manual' }),
+    });
+    const body = await response.json() as { data: { requester: { id: string }; transitions: Array<{ actorId: string }> } };
+
+    assert.equal(response.status, 201);
+    assert.equal(body.data.requester.id, 'client-user');
+    assert.equal(body.data.transitions[0]?.actorId, 'client-user');
+  }, { authRuntime: authRuntimeForRole('client') });
+});
+
+test('client authenticated actor is refused administrative, accounting, and global audit routes', async () => {
+  await withServer(async (baseUrl) => {
+    for (const path of ['/users', '/payments', '/audit-logs']) {
+      const response = await fetch(`${baseUrl}${path}`, { headers: { authorization: 'Bearer client-access-token' } });
+      assert.equal(response.status, 403, path);
+    }
+
+    const createPayment = await fetch(`${baseUrl}/payments`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: 'Bearer client-access-token' },
+      body: JSON.stringify({ beneficiaryId: 'BEN-001', amountCents: 1000, currency: 'USD', role: 'system_admin' }),
+    });
+    assert.equal(createPayment.status, 403);
+  }, { authRuntime: authRuntimeForRole('client') });
+});
+
+test('agent cannot access administrative user routes', async () => {
+  await withServer(async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/users`, { headers: { authorization: 'Bearer agent-access-token' } });
+    assert.equal(response.status, 403);
+  }, { authRuntime: authRuntimeForRole('operations_agent') });
+});
+
+test('auditor remains read-only for global audit and cannot create business data', async () => {
+  await withServer(async (baseUrl) => {
+    const auditResponse = await fetch(`${baseUrl}/audit-logs`, { headers: { authorization: 'Bearer auditor-access-token' } });
+    assert.equal(auditResponse.status, 200);
+
+    const paymentResponse = await fetch(`${baseUrl}/payments`, { headers: { authorization: 'Bearer auditor-access-token' } });
+    assert.equal(paymentResponse.status, 403);
+
+    const createBeneficiary = await fetch(`${baseUrl}/beneficiaries`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: 'Bearer auditor-access-token' },
+      body: JSON.stringify({ reference: 'BEN-AUDIT', displayName: 'Auditor Attempt' }),
+    });
+    assert.equal(createBeneficiary.status, 403);
+  }, { authRuntime: authRuntimeForRole('auditor') });
+});

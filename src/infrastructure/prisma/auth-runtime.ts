@@ -63,7 +63,7 @@ function configuredSecret(input: string | undefined, environmentName: string, la
 
 function roleFromRecord(user: PrismaAuthRuntimeUserRecord): Role {
   const role = user.roleId;
-  if (role === 'system_admin' || role === 'business_admin' || role === 'operations_agent' || role === 'finance_manager' || role === 'accountant' || role === 'auditor') return role;
+  if (role === 'system_admin' || role === 'business_admin' || role === 'operations_agent' || role === 'finance_manager' || role === 'client' || role === 'accountant' || role === 'auditor') return role;
   throw new ForbiddenError('Rôle utilisateur invalide');
 }
 
