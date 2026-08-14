@@ -3,7 +3,7 @@ import { AccessTokenService } from './access-token.js';
 import { AuthService, DeviceFingerprintService, RefreshTokenService, SecurityEventService, SessionService, TwoFactorService } from './services.js';
 import { HashPasswordVerifier, InMemoryAuthCredentialRepository, InMemoryAuthUserRepository, InMemoryDeviceFingerprintRepository, InMemoryLoginAttemptRepository, InMemoryPasswordResetRequestRepository, InMemoryRefreshTokenRepository, InMemorySecurityEventRepository, InMemorySessionRepository, InMemoryTwoFactorChallengeRepository, NodeSecretGenerator, SystemClock } from './in-memory.js';
 import type { AuthCredential, AuthenticatedUser, AuthSecurityPolicy, DeviceContext, LoginSession } from './types.js';
-import type { Role } from '../rbac/permissions.js';
+import { isRole, type Role } from '../rbac/permissions.js';
 
 export interface AuthenticatedActorSession {
   readonly id: string;
@@ -54,7 +54,7 @@ function configuredSecret(input: string | undefined, environmentName: string, la
 
 function roleFromMetadata(user: AuthenticatedUser): Role {
   const role = user.metadata.role;
-  if (role === 'system_admin' || role === 'business_admin' || role === 'operations_agent' || role === 'finance_manager' || role === 'client' || role === 'accountant' || role === 'auditor') return role;
+  if (isRole(role)) return role;
   throw new ForbiddenError('Rôle utilisateur invalide');
 }
 

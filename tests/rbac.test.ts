@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { ForbiddenError } from '../src/core/errors.js';
 import { authorize, can } from '../src/modules/rbac/authorize.js';
-import { permissions, rolePermissions, type Permission, type Role } from '../src/modules/rbac/permissions.js';
+import { historicalTransitionalRoles, officialBusinessRoleByTechnicalRole, permissions, rolePermissions, type Permission, type Role } from '../src/modules/rbac/permissions.js';
 
 const expectedRolePermissions: Record<Role, readonly Permission[]> = {
   system_admin: ['users:read', 'users:manage', 'roles:manage', 'beneficiaries:read', 'services:read', 'subscriptions:read', 'payments:read', 'invoices:read', 'audit:read'],
@@ -64,4 +64,34 @@ test('agent, accountant, and auditor cannot manage RBAC permissions', () => {
   assert.throws(() => authorize({ id: 'agent-1', role: 'operations_agent' }, 'roles:manage'), /Permission requise/);
   assert.throws(() => authorize({ id: 'accountant-1', role: 'accountant' }, 'roles:manage'), /Permission requise/);
   assert.throws(() => authorize({ id: 'auditor-1', role: 'auditor' }, 'roles:manage'), /Permission requise/);
+});
+
+test('technical roles are explicitly mapped to the six official business roles', () => {
+  assert.equal(JSON.stringify(officialBusinessRoleByTechnicalRole), JSON.stringify({
+    system_admin: 'Super Admin',
+    business_admin: 'Administrateur',
+    operations_agent: 'Agent',
+    client: 'Client',
+    accountant: 'Comptable',
+    auditor: 'Auditeur',
+  }));
+});
+
+test('finance_manager remains historical transitional and is not mapped to an official business role', () => {
+  assert.equal(historicalTransitionalRoles.finance_manager.includes('historique/transitoire'), true);
+  assert.equal(Object.hasOwn(officialBusinessRoleByTechnicalRole, 'finance_manager'), false);
+});
+
+test('client, agent, accountant, auditor, and administrator cannot obtain roles:manage', () => {
+  for (const role of ['client', 'operations_agent', 'accountant', 'auditor', 'business_admin'] as const) {
+    assert.equal(can({ id: `${role}-user`, role }, 'roles:manage'), false, role);
+    assert.throws(() => authorize({ id: `${role}-user`, role }, 'roles:manage'), /Permission requise/, role);
+  }
+});
+
+test('administrator is limited to its assigned RBAC permissions', () => {
+  assert.equal(can({ id: 'admin-1', role: 'business_admin' }, 'services:manage'), true);
+  assert.equal(can({ id: 'admin-1', role: 'business_admin' }, 'users:manage'), false);
+  assert.equal(can({ id: 'admin-1', role: 'business_admin' }, 'roles:manage'), false);
+  assert.equal(can({ id: 'admin-1', role: 'business_admin' }, 'audit:read'), false);
 });
