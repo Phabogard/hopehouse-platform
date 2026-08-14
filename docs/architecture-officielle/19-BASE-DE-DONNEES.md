@@ -115,3 +115,9 @@ Journalise les accès administratifs sensibles, notamment Login As, avec acteur,
 ### Prisma et Neon PostgreSQL
 
 Prisma ORM est la cible de modélisation et de migrations versionnées. Neon est uniquement un fournisseur PostgreSQL. La logique métier ne dépend jamais de Neon. Les migrations devront être additives, testées avant production et compatibles avec une stratégie expand/contract.
+
+### Lecture runtime de configuration
+
+`app_settings` reste la source unique de vérité pour les paramètres configurables. Le `ConfigurationService` lit uniquement des paramètres applicables à l'exécution via `namespace`, `key` et `scope` fournis par le serveur, jamais directement par une requête client comme source d'autorité. Les statuts non actifs, valeurs futures, expirées ou invalides ne deviennent pas des configurations runtime.
+
+Les valeurs sensibles ne doivent pas être exposées dans les logs, erreurs ou réponses API. Ce lot ne crée pas de chiffrement applicatif improvisé, pas de CRUD d'administration, pas de RBAC dynamique et pas de nouvelle table de politiques de sécurité; ces sujets restent réservés à des lots ultérieurs.
