@@ -1,6 +1,6 @@
 import type { Server } from 'node:http';
 import { createHopeHouseServer } from '../../app.js';
-import { PrismaAuthRuntimeContext, type PrismaAuthRuntimeClient, type PrismaAuthRuntimeOptions } from './auth-runtime.js';
+import { PrismaAuthRuntimeContext, resolvePrismaAuthSecurityPolicy, type PrismaAuthRuntimeClient, type PrismaAuthRuntimeOptions } from './auth-runtime.js';
 import { createPrismaClient } from './client.js';
 
 export interface PrismaHopeHouseServerOptions {
@@ -19,7 +19,8 @@ export async function createPrismaHopeHouseServer(options: PrismaHopeHouseServer
     ...(authOptions.prisma ?? {}),
     databaseUrl: authOptions.databaseUrl ?? authOptions.prisma?.databaseUrl,
   });
-  const authRuntime = new PrismaAuthRuntimeContext(client, authOptions);
+  const policy = await resolvePrismaAuthSecurityPolicy(client, authOptions.policy);
+  const authRuntime = new PrismaAuthRuntimeContext(client, { ...authOptions, policy });
   const server = createHopeHouseServer({ authRuntime });
 
   return Object.freeze({
