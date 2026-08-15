@@ -3,7 +3,7 @@ import { ForbiddenError, ValidationError } from '../../core/errors.js';
 import { AccessTokenService } from '../../modules/auth-security/access-token.js';
 import { AuthService, DeviceFingerprintService, RefreshTokenService, SecurityEventService, SessionService, TwoFactorService } from '../../modules/auth-security/services.js';
 import type { AuthenticatedActor, AuthenticatedActorSession, AuthenticatedLoginResult, AuthRuntimeOptions } from '../../modules/auth-security/auth-context.js';
-import { defaultAuthSecurityPolicy, resolveAuthSecurityPolicy } from '../../modules/auth-security/policy.js';
+import { normalizeAuthSecurityPolicy, resolveAuthSecurityPolicy } from '../../modules/auth-security/policy.js';
 import type { AuthSecurityPolicy, Clock, DeviceContext, LoginSession, PasswordVerifier, SecretGenerator } from '../../modules/auth-security/types.js';
 import { ConfigurationService } from '../../modules/configuration/index.js';
 import type { Role } from '../../modules/rbac/permissions.js';
@@ -70,7 +70,7 @@ function hasAppSettingClient(client: PrismaAuthRuntimeClient): boolean {
 }
 
 export async function resolvePrismaAuthSecurityPolicy(client: PrismaAuthRuntimeClient, fallback?: Partial<AuthSecurityPolicy>): Promise<AuthSecurityPolicy> {
-  const safeFallback = Object.freeze({ ...defaultAuthSecurityPolicy, ...(fallback ?? {}) });
+  const safeFallback = normalizeAuthSecurityPolicy(fallback);
   if (!hasAppSettingClient(client)) return safeFallback;
   const configuration = new ConfigurationService({ repository: new PrismaAppSettingRepository(client), clock: new SystemClock() });
   return resolveAuthSecurityPolicy({ configuration, fallback: safeFallback });
@@ -114,7 +114,7 @@ export class PrismaAuthRuntimeContext {
   }
 
   constructor(private readonly client: PrismaAuthRuntimeClient, options: AuthRuntimeOptions = {}) {
-    this.policy = Object.freeze({ ...defaultAuthSecurityPolicy, ...(options.policy ?? {}) });
+    this.policy = normalizeAuthSecurityPolicy(options.policy);
     this.userRepository = new PrismaAuthUserRepository(client);
     this.credentialRepository = new PrismaAuthCredentialRepository(client);
     this.loginAttemptRepository = new PrismaLoginAttemptRepository(client);
@@ -171,4 +171,3 @@ export class PrismaAuthRuntimeContext {
     return Object.freeze({ id: user.id, role: roleFromRecord(user), sessionId: session.id });
   }
 }
-

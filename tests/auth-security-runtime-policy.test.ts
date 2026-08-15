@@ -1,10 +1,20 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { resolveAuthSecurityPolicy, resolveAuthSecurityPolicyValue, defaultAuthSecurityPolicy } from '../src/modules/auth-security/policy.js';
+import { normalizeAuthSecurityPolicy, resolveAuthSecurityPolicy, resolveAuthSecurityPolicyValue, defaultAuthSecurityPolicy } from '../src/modules/auth-security/policy.js';
 import { ConfigurationService, InMemoryAppSettingRepository, type AppSetting } from '../src/modules/configuration/index.js';
 
 const now = new Date('2026-08-14T00:00:00.000Z');
 const globalScope = Object.freeze({ type: 'global', id: null });
+
+async function assertRejectsInvalidPolicy(operation: () => Promise<unknown>): Promise<void> {
+  try {
+    await operation();
+  } catch (error) {
+    assert.equal(String(error).includes('auth-security invalide'), true);
+    return;
+  }
+  throw new Error('invalid fallback should be rejected');
+}
 
 function setting(input: Partial<AppSetting> & { id: string; value?: unknown }): AppSetting {
   return Object.freeze({
@@ -80,6 +90,34 @@ test('auth-security runtime policy does not allow user or client preferences to 
   assert.throws(() => resolveAuthSecurityPolicyValue({ requireTwoFactor: false }, mandatory), /auth-security invalide/);
   assert.throws(() => resolveAuthSecurityPolicyValue({ sessionIdleTtlMs: 14 * 24 * 60 * 60 * 1000 }, mandatory), /auth-security invalide/);
   assert.throws(() => resolveAuthSecurityPolicyValue({ loginBlockThreshold: 99 }, mandatory), /auth-security invalide/);
+});
+
+test('auth-security runtime policy validates every injected fallback bound before use', async () => {
+  for (const fallback of [
+    { accessTokenTtlMs: 60_000 },
+    { refreshTokenTtlMs: 30 * 60 * 1000 },
+    { sessionAbsoluteTtlMs: 30 * 60 * 1000 },
+    { sessionIdleTtlMs: 10 * 60 * 1000 },
+    { passwordResetTokenTtlMs: 60_000 },
+    { twoFactorChallengeTtlMs: 30 * 1000 },
+    { twoFactorMaxAttempts: 0 },
+    { loginBlockThreshold: 0 },
+    { blockDurationMs: 60_000 },
+    { requireTwoFactor: 'false' },
+    { refreshTokenReuseAction: 'record_only' },
+  ]) {
+    assert.throws(() => normalizeAuthSecurityPolicy(fallback as never), /auth-security invalide/);
+    await assertRejectsInvalidPolicy(() => resolve([], fallback as never));
+  }
+});
+
+test('auth-security runtime policy normalizes valid partial fallbacks without changing defaults', () => {
+  const policy = normalizeAuthSecurityPolicy({ requireTwoFactor: true, accessTokenTtlMs: 600_000 });
+
+  assert.equal(policy.requireTwoFactor, true);
+  assert.equal(policy.accessTokenTtlMs, 600_000);
+  assert.equal(policy.refreshTokenTtlMs, defaultAuthSecurityPolicy.refreshTokenTtlMs);
+  assert.equal(policy.refreshTokenReuseAction, defaultAuthSecurityPolicy.refreshTokenReuseAction);
 });
 
 test('auth-security runtime policy errors do not expose sensitive app_settings values', async () => {

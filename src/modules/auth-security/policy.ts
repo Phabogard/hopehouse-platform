@@ -63,25 +63,47 @@ function refreshTokenReuseAction(value: unknown): RefreshTokenReuseAction {
   throw new ValidationError('Politique auth-security invalide');
 }
 
-export function resolveAuthSecurityPolicyValue(value: unknown, fallback: AuthSecurityPolicy = defaultAuthSecurityPolicy): AuthSecurityPolicy {
-  if (!isRuntimePolicyValue(value)) throw new ValidationError('Politique auth-security invalide');
+function booleanPolicyValue(value: unknown): boolean {
+  if (typeof value !== 'boolean') throw new ValidationError('Politique auth-security invalide');
+  return value;
+}
+
+export function normalizeAuthSecurityPolicy(value: Partial<AuthSecurityPolicy> = {}): AuthSecurityPolicy {
   return Object.freeze({
-    accessTokenTtlMs: value.accessTokenTtlMs === undefined ? fallback.accessTokenTtlMs : boundedInteger(value.accessTokenTtlMs, 'accessTokenTtlMs'),
-    refreshTokenTtlMs: value.refreshTokenTtlMs === undefined ? fallback.refreshTokenTtlMs : boundedInteger(value.refreshTokenTtlMs, 'refreshTokenTtlMs'),
-    sessionAbsoluteTtlMs: value.sessionAbsoluteTtlMs === undefined ? fallback.sessionAbsoluteTtlMs : boundedInteger(value.sessionAbsoluteTtlMs, 'sessionAbsoluteTtlMs'),
-    sessionIdleTtlMs: value.sessionIdleTtlMs === undefined ? fallback.sessionIdleTtlMs : optionalIdleTtl(value.sessionIdleTtlMs),
-    passwordResetTokenTtlMs: value.passwordResetTokenTtlMs === undefined ? fallback.passwordResetTokenTtlMs : boundedInteger(value.passwordResetTokenTtlMs, 'passwordResetTokenTtlMs'),
-    twoFactorChallengeTtlMs: value.twoFactorChallengeTtlMs === undefined ? fallback.twoFactorChallengeTtlMs : boundedInteger(value.twoFactorChallengeTtlMs, 'twoFactorChallengeTtlMs'),
-    twoFactorMaxAttempts: value.twoFactorMaxAttempts === undefined ? fallback.twoFactorMaxAttempts : boundedInteger(value.twoFactorMaxAttempts, 'twoFactorMaxAttempts'),
-    loginBlockThreshold: value.loginBlockThreshold === undefined ? fallback.loginBlockThreshold : boundedInteger(value.loginBlockThreshold, 'loginBlockThreshold'),
-    blockDurationMs: value.blockDurationMs === undefined ? fallback.blockDurationMs : boundedInteger(value.blockDurationMs, 'blockDurationMs'),
-    requireTwoFactor: requireTwoFactor(value.requireTwoFactor, fallback.requireTwoFactor),
-    refreshTokenReuseAction: value.refreshTokenReuseAction === undefined ? fallback.refreshTokenReuseAction : refreshTokenReuseAction(value.refreshTokenReuseAction),
+    accessTokenTtlMs: boundedInteger(value.accessTokenTtlMs ?? defaultAuthSecurityPolicy.accessTokenTtlMs, 'accessTokenTtlMs'),
+    refreshTokenTtlMs: boundedInteger(value.refreshTokenTtlMs ?? defaultAuthSecurityPolicy.refreshTokenTtlMs, 'refreshTokenTtlMs'),
+    sessionAbsoluteTtlMs: boundedInteger(value.sessionAbsoluteTtlMs ?? defaultAuthSecurityPolicy.sessionAbsoluteTtlMs, 'sessionAbsoluteTtlMs'),
+    sessionIdleTtlMs: value.sessionIdleTtlMs === undefined ? defaultAuthSecurityPolicy.sessionIdleTtlMs : optionalIdleTtl(value.sessionIdleTtlMs),
+    passwordResetTokenTtlMs: boundedInteger(value.passwordResetTokenTtlMs ?? defaultAuthSecurityPolicy.passwordResetTokenTtlMs, 'passwordResetTokenTtlMs'),
+    twoFactorChallengeTtlMs: boundedInteger(value.twoFactorChallengeTtlMs ?? defaultAuthSecurityPolicy.twoFactorChallengeTtlMs, 'twoFactorChallengeTtlMs'),
+    twoFactorMaxAttempts: boundedInteger(value.twoFactorMaxAttempts ?? defaultAuthSecurityPolicy.twoFactorMaxAttempts, 'twoFactorMaxAttempts'),
+    loginBlockThreshold: boundedInteger(value.loginBlockThreshold ?? defaultAuthSecurityPolicy.loginBlockThreshold, 'loginBlockThreshold'),
+    blockDurationMs: boundedInteger(value.blockDurationMs ?? defaultAuthSecurityPolicy.blockDurationMs, 'blockDurationMs'),
+    requireTwoFactor: value.requireTwoFactor === undefined ? defaultAuthSecurityPolicy.requireTwoFactor : booleanPolicyValue(value.requireTwoFactor),
+    refreshTokenReuseAction: value.refreshTokenReuseAction === undefined ? defaultAuthSecurityPolicy.refreshTokenReuseAction : refreshTokenReuseAction(value.refreshTokenReuseAction),
   });
 }
 
-export async function resolveAuthSecurityPolicy(input: { configuration: ConfigurationService; fallback?: AuthSecurityPolicy }): Promise<AuthSecurityPolicy> {
-  const fallback = input.fallback ?? defaultAuthSecurityPolicy;
+export function resolveAuthSecurityPolicyValue(value: unknown, fallback: AuthSecurityPolicy = defaultAuthSecurityPolicy): AuthSecurityPolicy {
+  const safeFallback = normalizeAuthSecurityPolicy(fallback);
+  if (!isRuntimePolicyValue(value)) throw new ValidationError('Politique auth-security invalide');
+  return Object.freeze({
+    accessTokenTtlMs: value.accessTokenTtlMs === undefined ? safeFallback.accessTokenTtlMs : boundedInteger(value.accessTokenTtlMs, 'accessTokenTtlMs'),
+    refreshTokenTtlMs: value.refreshTokenTtlMs === undefined ? safeFallback.refreshTokenTtlMs : boundedInteger(value.refreshTokenTtlMs, 'refreshTokenTtlMs'),
+    sessionAbsoluteTtlMs: value.sessionAbsoluteTtlMs === undefined ? safeFallback.sessionAbsoluteTtlMs : boundedInteger(value.sessionAbsoluteTtlMs, 'sessionAbsoluteTtlMs'),
+    sessionIdleTtlMs: value.sessionIdleTtlMs === undefined ? safeFallback.sessionIdleTtlMs : optionalIdleTtl(value.sessionIdleTtlMs),
+    passwordResetTokenTtlMs: value.passwordResetTokenTtlMs === undefined ? safeFallback.passwordResetTokenTtlMs : boundedInteger(value.passwordResetTokenTtlMs, 'passwordResetTokenTtlMs'),
+    twoFactorChallengeTtlMs: value.twoFactorChallengeTtlMs === undefined ? safeFallback.twoFactorChallengeTtlMs : boundedInteger(value.twoFactorChallengeTtlMs, 'twoFactorChallengeTtlMs'),
+    twoFactorMaxAttempts: value.twoFactorMaxAttempts === undefined ? safeFallback.twoFactorMaxAttempts : boundedInteger(value.twoFactorMaxAttempts, 'twoFactorMaxAttempts'),
+    loginBlockThreshold: value.loginBlockThreshold === undefined ? safeFallback.loginBlockThreshold : boundedInteger(value.loginBlockThreshold, 'loginBlockThreshold'),
+    blockDurationMs: value.blockDurationMs === undefined ? safeFallback.blockDurationMs : boundedInteger(value.blockDurationMs, 'blockDurationMs'),
+    requireTwoFactor: requireTwoFactor(value.requireTwoFactor, safeFallback.requireTwoFactor),
+    refreshTokenReuseAction: value.refreshTokenReuseAction === undefined ? safeFallback.refreshTokenReuseAction : refreshTokenReuseAction(value.refreshTokenReuseAction),
+  });
+}
+
+export async function resolveAuthSecurityPolicy(input: { configuration: ConfigurationService; fallback?: Partial<AuthSecurityPolicy> }): Promise<AuthSecurityPolicy> {
+  const fallback = normalizeAuthSecurityPolicy(input.fallback);
   const setting = await input.configuration.resolve(authSecurityPolicySetting);
   if (setting === null) return fallback;
   try {
