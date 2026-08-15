@@ -14,7 +14,9 @@ client_profiles, agent_profiles, catalogs, catalog_items, networks, providers, s
 
 ## Tables futures obligatoires non encore présentes
 
-qr_codes, withdrawal_codes, device_fingerprints, login_attempts, login_sessions, security_events, conversations, conversation_participants, messages, message_receipts, message_media, groups, communities, announcements, statuses, polls, meetings, loyalty_accounts, loyalty_transactions, referral_codes, referral_rewards, promotions, accessory_products, central_stock_movements, agent_stock_items, agent_shop_products, app_settings et admin_access_logs.
+qr_codes, withdrawal_codes, conversations, conversation_participants, messages, message_receipts, message_media, groups, communities, announcements, statuses, polls, meetings, loyalty_accounts, loyalty_transactions, referral_codes, referral_rewards, promotions, accessory_products, central_stock_movements, agent_stock_items, agent_shop_products et autres domaines futurs non encore implémentés.
+
+Les tables Authentification & Sécurité du Lot 1 ci-dessous sont désormais présentes dans le contrat Prisma/SQL documentaire et certaines sont consommées par le runtime; elles ne doivent donc plus être décrites comme purement futures.
 
 ## Contraintes
 
@@ -28,11 +30,10 @@ Ce document appartient au corpus officiel Hope House Platform. Il est obligatoir
 
 Moteur universel, configuration dynamique, wallets numériques, RBAC configurable, connecteurs indépendants, audit complet et compatibilité ascendante sont obligatoires.
 
-
 ## Dictionnaire détaillé des tables actuelles
 
 ### roles
-Rôle : référentiel des rôles configurables. Colonnes : id TEXT PK, name TEXT UNIQUE, description TEXT. Contraintes : unicité du nom. Relations : role_permissions, users.role_id transitoire. Règles : suppression logique cible à ajouter avant production.
+Rôle : référentiel des rôles configurables. Colonnes : id TEXT PK, name TEXT UNIQUE, description TEXT. Contraintes : unicité du nom. Relations : role_permissions, users.role_id. Règles : suppression logique cible à ajouter avant production.
 
 ### permissions
 Rôle : référentiel des permissions configurables. Colonnes : id TEXT PK, description TEXT. Relations : role_permissions. Règles : toute permission utilisée par une API ou un bouton doit exister ici en cible.
@@ -41,7 +42,7 @@ Rôle : référentiel des permissions configurables. Colonnes : id TEXT PK, desc
 Rôle : association rôle-permission. Colonnes : role_id FK, permission_id FK, PK composite. Règles : tout changement est audité.
 
 ### users
-Rôle : comptes d'accès. Colonnes : id, email unique, display_name, status, role_id transitoire, created_at, updated_at. Contraintes : statut actif/inactif/suspendu/archivé. Relations : profils, audits, commandes. Règles : suppression logique, blocage, déblocage, sécurité appareil.
+Rôle : comptes d'accès. Colonnes : id, email unique, display_name, status, role_id, created_at, updated_at. Contraintes : statut actif/inactif/suspendu/archivé. Relations : role, profils, audits, commandes. Règles : suppression logique, blocage, déblocage, sécurité appareil.
 
 ### beneficiaries, services, subscriptions, payments, invoices, audit_logs
 Rôle : socle MVP conservé. Ces tables restent compatibles mais doivent évoluer vers service_definitions, orders, wallets et audit durable. Les paiements directs sont transitoires ; la cible impose wallet et moteur universel.
@@ -62,15 +63,13 @@ Messagerie : conversations, conversation_participants, messages, message_receipt
 
 QR et codes : qr_codes, withdrawal_codes, temporary_pins. Règles : type, expiration, usage unique, statut, bénéficiaire affiché, anti-rejeu, audit.
 
-Sécurité : device_fingerprints, login_attempts, login_sessions, security_events, two_factor_settings. Règles : blocage 4 tentatives, délai 24 h par défaut, révocation appareil, 2FA configurable.
-
 Marketplace : accessory_products, central_stock_movements, agent_stock_items, agent_shop_products, accessory_orders, deliveries. Règles : Hope House fournisseur officiel, stock central, stock Agent, prix achat, prix vente, bénéfice.
 
 Engagement : loyalty_accounts, loyalty_transactions, referral_codes, referral_rewards, promotions, bonus_rules. Règles : calcul configurable, expiration, anti-fraude, audit.
 
 ## Tables Authentification & Sécurité — Lot 1 contractuel
 
-Le Lot 1 ajoute au schéma conceptuel les tables nécessaires à l'authentification et à la sécurité, sans migration de production ni client Prisma runtime. PostgreSQL reste la cible; Prisma ORM sera introduit progressivement dans un lot ultérieur avec migrations versionnées compatibles expand/contract.
+Le Lot 1 établit le contrat des tables d'authentification et de sécurité et fournit désormais un socle runtime partiel. Il ne constitue toujours pas une migration de production. PostgreSQL reste la cible; Prisma ORM est le modèle de référence et la future source des migrations versionnées compatibles expand/contract.
 
 ### app_settings
 
@@ -119,5 +118,7 @@ Prisma ORM est la cible de modélisation et de migrations versionnées. Neon est
 ### Lecture runtime de configuration
 
 `app_settings` reste la source unique de vérité pour les paramètres configurables. Le `ConfigurationService` lit uniquement des paramètres applicables à l'exécution via `namespace`, `key` et `scope` fournis par le serveur, jamais directement par une requête client comme source d'autorité. Les statuts non actifs, valeurs futures, expirées ou invalides ne deviennent pas des configurations runtime.
+
+La policy runtime Auth/Security est actuellement résolue via `ConfigurationService` avec l'identité système `auth-security / runtime-policy / global / null`, puis injectée dans le runtime Prisma avant la composition du serveur. Les préférences client, utilisateur ou tenant ne peuvent pas remplacer cette politique système obligatoire.
 
 Les valeurs sensibles ne doivent pas être exposées dans les logs, erreurs ou réponses API. Ce lot ne crée pas de chiffrement applicatif improvisé, pas de CRUD d'administration, pas de RBAC dynamique et pas de nouvelle table de politiques de sécurité; ces sujets restent réservés à des lots ultérieurs.
