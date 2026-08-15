@@ -2,7 +2,7 @@
 
 ## Authentification
 
-JWT obligatoire pour routes protégées. Sessions révocables. Rafraîchissement, expiration, rotation et révocation doivent être documentés dans OpenAPI avant implémentation.
+JWT obligatoire pour routes protégées. Sessions révocables. Rafraîchissement, expiration, rotation et révocation doivent être documentés dans OpenAPI avant implémentation complète des domaines concernés.
 
 ## RBAC
 
@@ -36,10 +36,9 @@ Ce document appartient au corpus officiel Hope House Platform. Il est obligatoir
 
 Moteur universel, configuration dynamique, wallets numériques, RBAC configurable, connecteurs indépendants, audit complet et compatibilité ascendante sont obligatoires.
 
-
 ## Architecture Authentification & Sécurité — Lot 1 contractuel
 
-Le Lot 1 documente le contrat et le modèle cible sans implémenter de code métier, middleware, logique JWT, intégration Prisma runtime, connexion Neon ou dépendance supplémentaire. Les routes et tables décrites deviennent des références contractuelles pour une implémentation ultérieure validée.
+Le Lot 1 établit le contrat des composants d'authentification et de sécurité et fournit désormais un premier socle runtime. La persistance PostgreSQL complète et les domaines non encore migrés restent des étapes ultérieures. Prisma ORM est le modèle de référence pour la persistance et les futures migrations versionnées; Neon est uniquement un fournisseur PostgreSQL.
 
 ### Paramètres configurables
 
@@ -71,13 +70,13 @@ Les valeurs de référence sont : access token 15 minutes, refresh token 30 jour
 
 ### Prisma et Neon PostgreSQL
 
-PostgreSQL reste la cible de persistance. Prisma ORM et Neon PostgreSQL sont documentés comme architecture cible de persistance : Prisma pour le modèle et les migrations versionnées, Neon uniquement comme fournisseur PostgreSQL. Aucun domaine métier ne dépend de Neon. Les secrets, URL de connexion, clés JWT, paramètres 2FA et chaînes de connexion ne sont jamais versionnés.
+PostgreSQL reste la cible de persistance. Prisma ORM est le modèle de référence et la future source des migrations versionnées; Neon est uniquement le fournisseur PostgreSQL. Aucun domaine métier ne dépend de Neon. Les secrets, URL de connexion, clés JWT, paramètres 2FA et chaînes de connexion ne sont jamais versionnés.
 
 ## Implémentation Phase 1A — Authentification JWT et sessions
 
-La Phase 1A implémente un premier socle runtime sans attendre la persistance PostgreSQL de la Phase 2. Elle introduit l'émission et la vérification d'access tokens signés, la création de sessions révocables via le module `auth-security`, l'émission de refresh tokens par le service existant et l'endpoint `POST /auth/login`.
+La Phase 1A implémente un premier socle runtime sans attendre la persistance PostgreSQL complète. Elle introduit l'émission et la vérification d'access tokens signés, la création de sessions révocables via le module `auth-security`, l'émission de refresh tokens par le service existant et l'endpoint `POST /auth/login`.
 
-Les repositories utilisés par cette phase sont volontairement in-memory et transitoires. Ils implémentent les interfaces du module `auth-security` afin d'être remplacés par des repositories PostgreSQL lors de la Phase 2 sans modifier la logique métier. Les secrets JWT et le mot de passe bootstrap doivent être fournis par configuration ou injection de test; aucun secret de production ne doit être versionné.
+Les repositories utilisés par cette phase restent in-memory et transitoires pour les domaines non encore migrés vers PostgreSQL. Ils implémentent les interfaces du module `auth-security` afin d'être remplacés par des repositories PostgreSQL lors de la phase de persistance sans modifier la logique métier. Les secrets JWT et le mot de passe bootstrap doivent être fournis par configuration ou injection de test; aucun secret de production ne doit être versionné.
 
 Le RBAC reste statique pendant cette phase et sera remplacé par le RBAC dynamique en Phase 4. Les acteurs de démonstration restent uniquement pour les routes non encore migrées; leur suppression définitive est prévue en Phase 1D.
 
