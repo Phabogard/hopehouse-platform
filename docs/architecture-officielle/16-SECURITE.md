@@ -80,3 +80,15 @@ La Phase 1A implémente un premier socle runtime sans attendre la persistance Po
 Les repositories utilisés par cette phase sont volontairement in-memory et transitoires. Ils implémentent les interfaces du module `auth-security` afin d'être remplacés par des repositories PostgreSQL lors de la Phase 2 sans modifier la logique métier. Les secrets JWT et le mot de passe bootstrap doivent être fournis par configuration ou injection de test; aucun secret de production ne doit être versionné.
 
 Le RBAC reste statique pendant cette phase et sera remplacé par le RBAC dynamique en Phase 4. Les acteurs de démonstration restent uniquement pour les routes non encore migrées; leur suppression définitive est prévue en Phase 1D.
+
+## Contrat runtime Auth/Security via app_settings
+
+La politique runtime Auth/Security est résolue depuis `ConfigurationService` et `app_settings` avec l'identité stricte suivante : namespace `auth-security`, key `runtime-policy`, scopeType `global`, scopeId `null`. Les scopes client, utilisateur ou tenant sont des préférences ou des paramètres de périmètre et ne peuvent pas remplacer cette politique système obligatoire.
+
+La valeur JSON attendue est un objet partiel dont les champs autorisés sont ceux du contrat `AuthSecurityPolicy` existant : `accessTokenTtlMs`, `refreshTokenTtlMs`, `sessionAbsoluteTtlMs`, `sessionIdleTtlMs`, `passwordResetTokenTtlMs`, `twoFactorChallengeTtlMs`, `twoFactorMaxAttempts`, `loginBlockThreshold`, `blockDurationMs`, `requireTwoFactor` et `refreshTokenReuseAction`. Aucun secret, rôle, identifiant demandeur ou paramètre HTTP ne fait partie de ce contrat.
+
+Règles d'applicabilité : seul un enregistrement `active`, non futur, non expiré, de valeur JSON objet, et correspondant exactement au scope global est applicable. Une configuration absente, `draft`, `archived`, future, expirée, de mauvais scope ou de forme invalide est ignorée et le fallback sûr transitoire est conservé.
+
+Bornes runtime acceptées : access token de 5 à 60 minutes; refresh token de 1 heure à 30 jours; session absolue de 1 heure à 30 jours; session idle `null` ou de 15 minutes à 7 jours; token de réinitialisation de 5 à 60 minutes; challenge 2FA de 1 à 10 minutes; tentatives 2FA de 1 à 5; seuil de blocage login de 1 à 10; durée de blocage de 15 minutes à 7 jours. `refreshTokenReuseAction` accepte uniquement `revoke_session` ou `revoke_user_sessions` depuis `app_settings`; `record_only` reste un type historique/test mais n'est pas accepté comme politique persistée. `requireTwoFactor` peut renforcer la politique mais ne peut pas être abaissé lorsqu'un fallback serveur l'impose déjà.
+
+Le fallback sûr transitoire reste la politique par défaut du runtime Auth/Security existant. Une valeur persistée invalide ne produit pas de politique permissive et ne doit pas exposer la valeur fautive dans les logs, erreurs ou réponses. Les préférences client/utilisateur ne peuvent jamais désactiver 2FA imposée, diminuer les règles de session, modifier les règles de blocage, ni affaiblir la rotation ou la réaction à la réutilisation des refresh tokens.

@@ -3,8 +3,11 @@ import { ForbiddenError, ValidationError } from '../../core/errors.js';
 import { AccessTokenService } from '../../modules/auth-security/access-token.js';
 import { AuthService, DeviceFingerprintService, RefreshTokenService, SecurityEventService, SessionService, TwoFactorService } from '../../modules/auth-security/services.js';
 import type { AuthenticatedActor, AuthenticatedActorSession, AuthenticatedLoginResult, AuthRuntimeOptions } from '../../modules/auth-security/auth-context.js';
+import { defaultAuthSecurityPolicy, resolveAuthSecurityPolicy } from '../../modules/auth-security/policy.js';
 import type { AuthSecurityPolicy, Clock, DeviceContext, LoginSession, PasswordVerifier, SecretGenerator } from '../../modules/auth-security/types.js';
+import { ConfigurationService } from '../../modules/configuration/index.js';
 import type { Role } from '../../modules/rbac/permissions.js';
+import { PrismaAppSettingRepository, type PrismaAppSettingClient } from './app-setting-repository.js';
 import { PrismaAuthCredentialRepository, type PrismaAuthCredentialClient } from './auth-credential-repository.js';
 import { PrismaAuthUserRepository, type PrismaAuthUserClient } from './auth-user-repository.js';
 import { createPrismaClient, type CreatePrismaClientOptions, type PrismaClientLifecycle } from './client.js';
@@ -30,7 +33,7 @@ type PrismaAuthRuntimeUserDelegate = {
 type PrismaAuthCredentialTransaction = Parameters<PrismaAuthCredentialClient['$transaction']>[0] extends (transaction: infer TTransaction) => Promise<unknown> ? TTransaction : never;
 type PrismaRefreshTokenTransaction = Parameters<PrismaRefreshTokenClient['$transaction']>[0] extends (transaction: infer TTransaction) => Promise<unknown> ? TTransaction : never;
 
-export interface PrismaAuthRuntimeClient extends PrismaClientLifecycle, PrismaAuthUserClient, Omit<PrismaAuthCredentialClient, '$transaction'>, PrismaDeviceFingerprintClient, PrismaLoginAttemptClient, PrismaPasswordResetRequestClient, Omit<PrismaRefreshTokenClient, '$transaction'>, PrismaSecurityEventClient, PrismaSessionClient, PrismaTwoFactorChallengeClient {
+export interface PrismaAuthRuntimeClient extends PrismaClientLifecycle, PrismaAppSettingClient, PrismaAuthUserClient, Omit<PrismaAuthCredentialClient, '$transaction'>, PrismaDeviceFingerprintClient, PrismaLoginAttemptClient, PrismaPasswordResetRequestClient, Omit<PrismaRefreshTokenClient, '$transaction'>, PrismaSecurityEventClient, PrismaSessionClient, PrismaTwoFactorChallengeClient {
   readonly user: PrismaAuthUserClient['user'] & PrismaAuthRuntimeUserDelegate;
   $transaction<T>(operation: (transaction: PrismaAuthCredentialTransaction) => Promise<T>): Promise<T>;
   $transaction<T>(operation: (transaction: PrismaRefreshTokenTransaction) => Promise<T>): Promise<T>;
@@ -40,20 +43,6 @@ export interface PrismaAuthRuntimeOptions extends AuthRuntimeOptions {
   readonly databaseUrl?: string;
   readonly prisma?: CreatePrismaClientOptions<PrismaAuthRuntimeClient>;
 }
-
-const defaultPolicy: AuthSecurityPolicy = Object.freeze({
-  accessTokenTtlMs: 15 * 60 * 1000,
-  refreshTokenTtlMs: 30 * 24 * 60 * 60 * 1000,
-  sessionAbsoluteTtlMs: 30 * 24 * 60 * 60 * 1000,
-  sessionIdleTtlMs: 7 * 24 * 60 * 60 * 1000,
-  passwordResetTokenTtlMs: 15 * 60 * 1000,
-  twoFactorChallengeTtlMs: 5 * 60 * 1000,
-  twoFactorMaxAttempts: 3,
-  loginBlockThreshold: 4,
-  blockDurationMs: 24 * 60 * 60 * 1000,
-  requireTwoFactor: false,
-  refreshTokenReuseAction: 'revoke_session',
-});
 
 function configuredSecret(input: string | undefined, environmentName: string, label: string): string {
   const value = input ?? process.env[environmentName];
@@ -73,6 +62,18 @@ function toSessionResponse(session: LoginSession): AuthenticatedActorSession {
 
 class SystemClock implements Clock {
   now(): Date { return new Date(); }
+}
+
+
+function hasAppSettingClient(client: PrismaAuthRuntimeClient): boolean {
+  return typeof (client as { readonly appSetting?: unknown }).appSetting === 'object' && (client as { readonly appSetting?: unknown }).appSetting !== null;
+}
+
+export async function resolvePrismaAuthSecurityPolicy(client: PrismaAuthRuntimeClient, fallback?: Partial<AuthSecurityPolicy>): Promise<AuthSecurityPolicy> {
+  const safeFallback = Object.freeze({ ...defaultAuthSecurityPolicy, ...(fallback ?? {}) });
+  if (!hasAppSettingClient(client)) return safeFallback;
+  const configuration = new ConfigurationService({ repository: new PrismaAppSettingRepository(client), clock: new SystemClock() });
+  return resolveAuthSecurityPolicy({ configuration, fallback: safeFallback });
 }
 
 class NodeSecretGenerator implements SecretGenerator {
@@ -108,11 +109,12 @@ export class PrismaAuthRuntimeContext {
 
   static async create(options: PrismaAuthRuntimeOptions = {}): Promise<PrismaAuthRuntimeContext> {
     const client = await createPrismaClient<PrismaAuthRuntimeClient>({ ...(options.prisma ?? {}), databaseUrl: options.databaseUrl ?? options.prisma?.databaseUrl });
-    return new PrismaAuthRuntimeContext(client, options);
+    const policy = await resolvePrismaAuthSecurityPolicy(client, options.policy);
+    return new PrismaAuthRuntimeContext(client, { ...options, policy });
   }
 
   constructor(private readonly client: PrismaAuthRuntimeClient, options: AuthRuntimeOptions = {}) {
-    this.policy = Object.freeze({ ...defaultPolicy, ...(options.policy ?? {}) });
+    this.policy = Object.freeze({ ...defaultAuthSecurityPolicy, ...(options.policy ?? {}) });
     this.userRepository = new PrismaAuthUserRepository(client);
     this.credentialRepository = new PrismaAuthCredentialRepository(client);
     this.loginAttemptRepository = new PrismaLoginAttemptRepository(client);

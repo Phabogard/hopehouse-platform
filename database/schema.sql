@@ -24,9 +24,12 @@ CREATE TABLE users (
   display_name TEXT NOT NULL,
   status TEXT NOT NULL CHECK (status IN ('active', 'inactive', 'suspended', 'archived')),
   role_id TEXT NOT NULL REFERENCES roles(id),
-  created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL
+  created_at TIMESTAMPTZ NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL
 );
+
+CREATE INDEX users_status_idx ON users (status);
+CREATE INDEX users_role_id_idx ON users (role_id);
 
 CREATE TABLE beneficiaries (
   id TEXT PRIMARY KEY,
@@ -228,16 +231,28 @@ CREATE TABLE app_settings (
   scope_type TEXT NOT NULL,
   scope_id TEXT,
   status TEXT NOT NULL CHECK (status IN ('draft', 'active', 'archived')),
-  value_json TEXT NOT NULL,
-  starts_at TEXT,
-  ends_at TEXT,
+  value_json JSONB NOT NULL,
+  starts_at TIMESTAMPTZ,
+  ends_at TIMESTAMPTZ,
   created_by_user_id TEXT REFERENCES users(id),
   updated_by_user_id TEXT REFERENCES users(id),
-  created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL,
-  metadata_json TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL,
+  metadata_json JSONB NOT NULL,
   UNIQUE (namespace, key, scope_type, scope_id, status)
 );
+
+CREATE UNIQUE INDEX app_settings_unique_global_identity
+  ON app_settings (namespace, key, scope_type, status)
+  WHERE scope_id IS NULL;
+
+CREATE UNIQUE INDEX app_settings_unique_scoped_identity
+  ON app_settings (namespace, key, scope_type, scope_id, status)
+  WHERE scope_id IS NOT NULL;
+
+CREATE INDEX app_settings_namespace_key_status_idx ON app_settings (namespace, key, status);
+CREATE INDEX app_settings_scope_status_idx ON app_settings (scope_type, scope_id, status);
+CREATE INDEX app_settings_validity_idx ON app_settings (starts_at, ends_at);
 
 CREATE TABLE auth_credentials (
   id TEXT PRIMARY KEY,
@@ -245,12 +260,15 @@ CREATE TABLE auth_credentials (
   credential_type TEXT NOT NULL,
   credential_hash TEXT NOT NULL,
   status TEXT NOT NULL CHECK (status IN ('active', 'disabled', 'rotated', 'archived')),
-  last_changed_at TEXT NOT NULL,
-  must_rotate_at TEXT,
-  created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL,
-  metadata_json TEXT NOT NULL
+  last_changed_at TIMESTAMPTZ NOT NULL,
+  must_rotate_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL,
+  metadata_json JSONB NOT NULL
 );
+
+CREATE INDEX auth_credentials_user_type_status_idx ON auth_credentials (user_id, credential_type, status);
+CREATE INDEX auth_credentials_must_rotate_at_idx ON auth_credentials (must_rotate_at);
 
 CREATE TABLE device_fingerprints (
   id TEXT PRIMARY KEY,
@@ -258,41 +276,55 @@ CREATE TABLE device_fingerprints (
   fingerprint_hash TEXT NOT NULL,
   label TEXT,
   status TEXT NOT NULL CHECK (status IN ('pending', 'trusted', 'untrusted', 'revoked', 'archived')),
-  first_seen_at TEXT NOT NULL,
-  last_seen_at TEXT NOT NULL,
-  revoked_at TEXT,
+  first_seen_at TIMESTAMPTZ NOT NULL,
+  last_seen_at TIMESTAMPTZ NOT NULL,
+  revoked_at TIMESTAMPTZ,
   revoked_by_user_id TEXT REFERENCES users(id),
-  metadata_json TEXT NOT NULL,
+  metadata_json JSONB NOT NULL,
   UNIQUE (user_id, fingerprint_hash)
 );
+
+CREATE INDEX device_fingerprints_user_status_idx ON device_fingerprints (user_id, status);
+CREATE INDEX device_fingerprints_last_seen_at_idx ON device_fingerprints (last_seen_at);
+CREATE INDEX device_fingerprints_revoked_at_idx ON device_fingerprints (revoked_at);
 
 CREATE TABLE login_sessions (
   id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL REFERENCES users(id),
   device_fingerprint_id TEXT REFERENCES device_fingerprints(id),
   status TEXT NOT NULL CHECK (status IN ('active', 'revoked', 'expired', 'archived')),
-  issued_at TEXT NOT NULL,
-  expires_at TEXT NOT NULL,
-  idle_expires_at TEXT,
-  last_seen_at TEXT,
-  revoked_at TEXT,
+  issued_at TIMESTAMPTZ NOT NULL,
+  expires_at TIMESTAMPTZ NOT NULL,
+  idle_expires_at TIMESTAMPTZ,
+  last_seen_at TIMESTAMPTZ,
+  revoked_at TIMESTAMPTZ,
   revoked_by_user_id TEXT REFERENCES users(id),
   revocation_reason TEXT,
-  metadata_json TEXT NOT NULL
+  metadata_json JSONB NOT NULL
 );
+
+CREATE INDEX login_sessions_user_status_idx ON login_sessions (user_id, status);
+CREATE INDEX login_sessions_device_status_idx ON login_sessions (device_fingerprint_id, status);
+CREATE INDEX login_sessions_expires_at_idx ON login_sessions (expires_at);
+CREATE INDEX login_sessions_idle_expires_at_idx ON login_sessions (idle_expires_at);
+CREATE INDEX login_sessions_revoked_at_idx ON login_sessions (revoked_at);
 
 CREATE TABLE session_refresh_tokens (
   id TEXT PRIMARY KEY,
   session_id TEXT NOT NULL REFERENCES login_sessions(id),
   token_hash TEXT NOT NULL UNIQUE,
   status TEXT NOT NULL CHECK (status IN ('active', 'rotated', 'revoked', 'expired', 'reused')),
-  issued_at TEXT NOT NULL,
-  expires_at TEXT NOT NULL,
-  rotated_at TEXT,
-  revoked_at TEXT,
+  issued_at TIMESTAMPTZ NOT NULL,
+  expires_at TIMESTAMPTZ NOT NULL,
+  rotated_at TIMESTAMPTZ,
+  revoked_at TIMESTAMPTZ,
   replaced_by_token_id TEXT REFERENCES session_refresh_tokens(id),
-  metadata_json TEXT NOT NULL
+  metadata_json JSONB NOT NULL
 );
+
+CREATE INDEX session_refresh_tokens_session_status_idx ON session_refresh_tokens (session_id, status);
+CREATE INDEX session_refresh_tokens_expires_at_idx ON session_refresh_tokens (expires_at);
+CREATE INDEX session_refresh_tokens_replaced_by_token_id_idx ON session_refresh_tokens (replaced_by_token_id);
 
 CREATE TABLE login_attempts (
   id TEXT PRIMARY KEY,
@@ -302,9 +334,14 @@ CREATE TABLE login_attempts (
   ip_address_hash TEXT,
   outcome TEXT NOT NULL CHECK (outcome IN ('succeeded', 'failed', 'blocked')),
   failure_reason TEXT,
-  occurred_at TEXT NOT NULL,
-  metadata_json TEXT NOT NULL
+  occurred_at TIMESTAMPTZ NOT NULL,
+  metadata_json JSONB NOT NULL
 );
+
+CREATE INDEX login_attempts_identifier_outcome_occurred_at_idx ON login_attempts (identifier_hash, outcome, occurred_at);
+CREATE INDEX login_attempts_user_occurred_at_idx ON login_attempts (user_id, occurred_at);
+CREATE INDEX login_attempts_ip_occurred_at_idx ON login_attempts (ip_address_hash, occurred_at);
+CREATE INDEX login_attempts_device_occurred_at_idx ON login_attempts (device_fingerprint_id, occurred_at);
 
 CREATE TABLE security_events (
   id TEXT PRIMARY KEY,
@@ -314,9 +351,15 @@ CREATE TABLE security_events (
   severity TEXT NOT NULL CHECK (severity IN ('info', 'medium', 'major', 'critical')),
   related_entity_type TEXT,
   related_entity_id TEXT,
-  occurred_at TEXT NOT NULL,
-  metadata_json TEXT NOT NULL
+  occurred_at TIMESTAMPTZ NOT NULL,
+  metadata_json JSONB NOT NULL
 );
+
+CREATE INDEX security_events_user_occurred_at_idx ON security_events (user_id, occurred_at);
+CREATE INDEX security_events_actor_occurred_at_idx ON security_events (actor_user_id, occurred_at);
+CREATE INDEX security_events_type_occurred_at_idx ON security_events (event_type, occurred_at);
+CREATE INDEX security_events_severity_occurred_at_idx ON security_events (severity, occurred_at);
+CREATE INDEX security_events_related_entity_idx ON security_events (related_entity_type, related_entity_id);
 
 CREATE TABLE password_reset_requests (
   id TEXT PRIMARY KEY,
@@ -324,11 +367,15 @@ CREATE TABLE password_reset_requests (
   identifier_hash TEXT NOT NULL,
   token_hash TEXT NOT NULL UNIQUE,
   status TEXT NOT NULL CHECK (status IN ('pending', 'completed', 'expired', 'revoked')),
-  expires_at TEXT NOT NULL,
-  completed_at TEXT,
-  created_at TEXT NOT NULL,
-  metadata_json TEXT NOT NULL
+  expires_at TIMESTAMPTZ NOT NULL,
+  completed_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL,
+  metadata_json JSONB NOT NULL
 );
+
+CREATE INDEX password_reset_requests_identifier_created_at_idx ON password_reset_requests (identifier_hash, created_at);
+CREATE INDEX password_reset_requests_user_status_created_at_idx ON password_reset_requests (user_id, status, created_at);
+CREATE INDEX password_reset_requests_status_expires_at_idx ON password_reset_requests (status, expires_at);
 
 CREATE TABLE two_factor_settings (
   id TEXT PRIMARY KEY,
@@ -336,11 +383,14 @@ CREATE TABLE two_factor_settings (
   scope_id TEXT,
   method TEXT NOT NULL,
   status TEXT NOT NULL CHECK (status IN ('active', 'inactive', 'archived')),
-  configuration_json TEXT NOT NULL,
-  created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL,
-  metadata_json TEXT NOT NULL
+  configuration_json JSONB NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL,
+  metadata_json JSONB NOT NULL
 );
+
+CREATE INDEX two_factor_settings_scope_status_idx ON two_factor_settings (scope_type, scope_id, status);
+CREATE INDEX two_factor_settings_method_status_idx ON two_factor_settings (method, status);
 
 CREATE TABLE two_factor_challenges (
   id TEXT PRIMARY KEY,
@@ -351,11 +401,18 @@ CREATE TABLE two_factor_challenges (
   challenge_hash TEXT,
   status TEXT NOT NULL CHECK (status IN ('pending', 'succeeded', 'failed', 'expired')),
   attempt_count INTEGER NOT NULL CHECK (attempt_count >= 0),
-  expires_at TEXT NOT NULL,
-  created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL,
-  metadata_json TEXT NOT NULL
+  max_attempts INTEGER NOT NULL CHECK (max_attempts > 0),
+  expires_at TIMESTAMPTZ NOT NULL,
+  verified_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL,
+  metadata_json JSONB NOT NULL
 );
+
+CREATE INDEX two_factor_challenges_user_status_created_at_idx ON two_factor_challenges (user_id, status, created_at);
+CREATE INDEX two_factor_challenges_status_expires_at_idx ON two_factor_challenges (status, expires_at);
+CREATE INDEX two_factor_challenges_session_id_idx ON two_factor_challenges (session_id);
+CREATE INDEX two_factor_challenges_action_status_created_at_idx ON two_factor_challenges (action, status, created_at);
 
 CREATE TABLE admin_access_logs (
   id TEXT PRIMARY KEY,
@@ -364,10 +421,15 @@ CREATE TABLE admin_access_logs (
   action TEXT NOT NULL,
   reason TEXT NOT NULL,
   session_id TEXT REFERENCES login_sessions(id),
-  started_at TEXT NOT NULL,
-  ended_at TEXT,
-  metadata_json TEXT NOT NULL
+  started_at TIMESTAMPTZ NOT NULL,
+  ended_at TIMESTAMPTZ,
+  metadata_json JSONB NOT NULL
 );
+
+CREATE INDEX admin_access_logs_actor_started_at_idx ON admin_access_logs (actor_user_id, started_at);
+CREATE INDEX admin_access_logs_target_started_at_idx ON admin_access_logs (target_user_id, started_at);
+CREATE INDEX admin_access_logs_action_started_at_idx ON admin_access_logs (action, started_at);
+CREATE INDEX admin_access_logs_session_id_idx ON admin_access_logs (session_id);
 
 CREATE TABLE wallets (
   id TEXT PRIMARY KEY,

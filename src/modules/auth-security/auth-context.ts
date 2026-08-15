@@ -3,6 +3,7 @@ import { AccessTokenService } from './access-token.js';
 import { AuthService, DeviceFingerprintService, RefreshTokenService, SecurityEventService, SessionService, TwoFactorService } from './services.js';
 import { HashPasswordVerifier, InMemoryAuthCredentialRepository, InMemoryAuthUserRepository, InMemoryDeviceFingerprintRepository, InMemoryLoginAttemptRepository, InMemoryPasswordResetRequestRepository, InMemoryRefreshTokenRepository, InMemorySecurityEventRepository, InMemorySessionRepository, InMemoryTwoFactorChallengeRepository, NodeSecretGenerator, SystemClock } from './in-memory.js';
 import type { AuthCredential, AuthenticatedUser, AuthSecurityPolicy, DeviceContext, LoginSession } from './types.js';
+import { defaultAuthSecurityPolicy } from './policy.js';
 import { isRole, type Role } from '../rbac/permissions.js';
 
 export interface AuthenticatedActorSession {
@@ -31,20 +32,6 @@ export interface AuthRuntimeOptions {
   readonly bootstrapPassword?: string;
   readonly policy?: Partial<AuthSecurityPolicy>;
 }
-
-const defaultPolicy: AuthSecurityPolicy = Object.freeze({
-  accessTokenTtlMs: 15 * 60 * 1000,
-  refreshTokenTtlMs: 30 * 24 * 60 * 60 * 1000,
-  sessionAbsoluteTtlMs: 30 * 24 * 60 * 60 * 1000,
-  sessionIdleTtlMs: 7 * 24 * 60 * 60 * 1000,
-  passwordResetTokenTtlMs: 15 * 60 * 1000,
-  twoFactorChallengeTtlMs: 5 * 60 * 1000,
-  twoFactorMaxAttempts: 3,
-  loginBlockThreshold: 4,
-  blockDurationMs: 24 * 60 * 60 * 1000,
-  requireTwoFactor: false,
-  refreshTokenReuseAction: 'revoke_session',
-});
 
 function configuredSecret(input: string | undefined, environmentName: string, label: string): string {
   const value = input ?? process.env[environmentName];
@@ -84,7 +71,7 @@ export class AuthRuntimeContext {
   readonly policy: AuthSecurityPolicy;
 
   constructor(options: AuthRuntimeOptions = {}) {
-    this.policy = Object.freeze({ ...defaultPolicy, ...(options.policy ?? {}) });
+    this.policy = Object.freeze({ ...defaultAuthSecurityPolicy, ...(options.policy ?? {}) });
     const bootstrapPassword = configuredSecret(options.bootstrapPassword, 'HOPEHOUSE_BOOTSTRAP_PASSWORD', 'bootstrapPassword');
     const bootstrapUser: AuthenticatedUser = Object.freeze({ id: 'bootstrap-system-admin', identifier: 'admin@hopehouse.local', status: 'active', metadata: Object.freeze({ role: 'system_admin' }) });
     const bootstrapCredential: AuthCredential = Object.freeze({ id: 'bootstrap-credential', userId: bootstrapUser.id, credentialType: 'password', credentialHash: this.secrets.hash(bootstrapPassword), status: 'active', lastChangedAt: this.clock.now().toISOString(), mustRotateAt: null, metadata: Object.freeze({ bootstrap: true }) });

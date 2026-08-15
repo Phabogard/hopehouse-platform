@@ -256,3 +256,62 @@ test('official docs keep auth security policies configurable through app setting
     assert.equal(documents.includes(requiredConcept), true, requiredConcept);
   }
 });
+
+test('PostgreSQL and Prisma contracts keep users linked to roles without dynamic RBAC migration', () => {
+  const prisma = readProjectFile('prisma/schema.prisma');
+  const schema = readProjectFile('database/schema.sql');
+
+  assert.equal(prisma.includes('model Role {'), true);
+  assert.equal(prisma.includes('role                    Role                  @relation(fields: [roleId], references: [id])'), true);
+  assert.equal(schema.includes('CREATE TABLE roles'), true);
+  assert.equal(schema.includes('role_id TEXT NOT NULL REFERENCES roles(id)'), true);
+});
+
+test('app_settings global and scoped uniqueness prevent nullable-scope ambiguity', () => {
+  const schema = readProjectFile('database/schema.sql');
+  const prisma = readProjectFile('prisma/schema.prisma');
+
+  assert.equal(prisma.includes('@@unique([namespace, key, scopeType, scopeId, status])'), true);
+  assert.equal(schema.includes('UNIQUE (namespace, key, scope_type, scope_id, status)'), true);
+  assert.equal(schema.includes('CREATE UNIQUE INDEX app_settings_unique_global_identity'), true);
+  assert.equal(schema.includes('ON app_settings (namespace, key, scope_type, status)'), true);
+  assert.equal(schema.includes('WHERE scope_id IS NULL'), true);
+  assert.equal(schema.includes('CREATE UNIQUE INDEX app_settings_unique_scoped_identity'), true);
+  assert.equal(schema.includes('ON app_settings (namespace, key, scope_type, scope_id, status)'), true);
+  assert.equal(schema.includes('WHERE scope_id IS NOT NULL'), true);
+});
+
+test('Auth/Security SQL contract uses PostgreSQL temporal JSON and security indexes', () => {
+  const schema = readProjectFile('database/schema.sql');
+
+  for (const fragment of [
+    'value_json JSONB NOT NULL',
+    'metadata_json JSONB NOT NULL',
+    'created_at TIMESTAMPTZ NOT NULL',
+    'expires_at TIMESTAMPTZ NOT NULL',
+    'login_sessions_user_status_idx',
+    'session_refresh_tokens_session_status_idx',
+    'login_attempts_identifier_outcome_occurred_at_idx',
+    'security_events_user_occurred_at_idx',
+    'password_reset_requests_status_expires_at_idx',
+  ]) {
+    assert.equal(schema.includes(fragment), true, fragment);
+  }
+});
+
+test('two_factor_challenges SQL contract preserves max attempts verified timestamp and attempt guard', () => {
+  const schema = readProjectFile('database/schema.sql');
+  const prisma = readProjectFile('prisma/schema.prisma');
+
+  for (const fragment of [
+    'attempt_count INTEGER NOT NULL CHECK (attempt_count >= 0)',
+    'max_attempts INTEGER NOT NULL CHECK (max_attempts > 0)',
+    'verified_at TIMESTAMPTZ',
+    'two_factor_challenges_status_expires_at_idx',
+  ]) {
+    assert.equal(schema.includes(fragment), true, fragment);
+  }
+
+  assert.equal(prisma.includes('maxAttempts   Int                      @map("max_attempts")'), true);
+  assert.equal(prisma.includes('verifiedAt    DateTime?                @map("verified_at")'), true);
+});
