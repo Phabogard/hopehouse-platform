@@ -7,6 +7,16 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+model Role {
+  id          String @id
+  name        String @unique
+  description String
+
+  users User[]
+
+  @@map("roles")
+}
+
 enum UserStatus {
   active
   inactive
@@ -89,6 +99,7 @@ model User {
   displayName String     @map("display_name")
   status      UserStatus
   roleId      String     @map("role_id")
+  role        Role       @relation(fields: [roleId], references: [id])
   createdAt   DateTime   @map("created_at")
   updatedAt   DateTime   @map("updated_at")
 
@@ -131,7 +142,9 @@ model AppSetting {
   createdBy User? @relation("AppSettingCreatedBy", fields: [createdByUserId], references: [id])
   updatedBy User? @relation("AppSettingUpdatedBy", fields: [updatedByUserId], references: [id])
 
-  @@unique([namespace, key, scopeType, scopeId, status])
+  // PostgreSQL contract enforces logical uniqueness with a NULLS NOT DISTINCT unique index.
+  // Prisma cannot express that index variant directly, so migrations must preserve it explicitly.
+  @@index([namespace, key, scopeType, scopeId, status])
   @@index([namespace, key, status])
   @@index([scopeType, scopeId, status])
   @@index([startsAt, endsAt])
