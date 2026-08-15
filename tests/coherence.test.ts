@@ -41,6 +41,7 @@ test('official architecture documentation corpus is present', () => {
     '29-SERVICES-DETAILLES.md',
     '30-GUIDE-DEVELOPPEUR.md',
     '31-GUIDE-SUPER-ADMIN.md',
+    '32-GUIDE-ONBOARDING-ROLES.md',
   ];
 
   for (const document of expectedDocuments) {
@@ -266,9 +267,11 @@ test('database contract aligns app_settings and auth security Prisma/PostgreSQL 
 
   assert.equal(schema.includes('CREATE UNIQUE INDEX app_settings_unique_identity'), true);
   assert.equal(schema.includes('NULLS NOT DISTINCT'), true);
+  assert.equal(/CREATE UNIQUE INDEX app_settings_unique_identity\s+ON app_settings\s*\(\s*namespace,\s*key,\s*scope_type,\s*scope_id,\s*status\s*\)\s+NULLS NOT DISTINCT;/.test(schema), true);
   assert.equal(schema.includes("CHECK ((scope_type = 'global' AND scope_id IS NULL) OR (scope_type <> 'global' AND scope_id IS NOT NULL))"), true);
   assert.equal(prisma.includes('@@index([namespace, key, scopeType, scopeId, status])'), true);
   assert.equal(prisma.includes('NULLS NOT DISTINCT unique index'), true);
+  assert.equal(prisma.includes('Prisma cannot express that index variant directly, so migrations must preserve it explicitly.'), true);
   assert.equal(databaseDoc.includes('NULLS NOT DISTINCT'), true);
   assert.equal(securityDoc.includes('NULLS NOT DISTINCT'), true);
 });
@@ -288,6 +291,7 @@ test('database contract aligns two factor challenge safety fields with Prisma', 
   assert.equal(schema.includes('attempt_count INTEGER NOT NULL CHECK (attempt_count >= 0)'), true);
   assert.equal(schema.includes('max_attempts INTEGER NOT NULL CHECK (max_attempts > 0)'), true);
   assert.equal(schema.includes('verified_at TIMESTAMPTZ'), true);
+  assert.equal(prisma.includes('attemptCount  Int                      @map("attempt_count")'), true);
   assert.equal(prisma.includes('maxAttempts   Int                      @map("max_attempts")'), true);
   assert.equal(prisma.includes('verifiedAt    DateTime?                @map("verified_at")'), true);
 });
