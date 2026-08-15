@@ -2,7 +2,7 @@
 
 ## Cible
 
-PostgreSQL est la cible. Les migrations futures doivent être versionnées, réversibles lorsque possible, testées et compatibles avec les données existantes.
+PostgreSQL est la cible. Prisma est le modèle ORM de référence et la future source des migrations versionnées. Le fichier `database/schema.sql` est un contrat SQL documentaire aligné avec Prisma/PostgreSQL; il ne constitue pas une migration de production. Les migrations futures doivent être versionnées, réversibles lorsque possible, testées et compatibles avec les données existantes.
 
 ## Tables MVP actuelles
 
@@ -74,7 +74,7 @@ Le Lot 1 ajoute au schéma conceptuel les tables nécessaires à l'authentificat
 
 ### app_settings
 
-`app_settings` est la source unique des paramètres configurables, y compris les politiques de sécurité. Elle évite la création d'une table `security_policies` séparée. Les paramètres sont identifiés par namespace, clé, scope, statut, période de validité, valeur JSON, auteur de création/modification et métadonnées.
+`app_settings` est la source unique des paramètres configurables, y compris les politiques de sécurité. Elle évite la création d'une table `security_policies` séparée. Les paramètres sont identifiés par namespace, clé, scope, statut, période de validité, valeur JSONB, auteur de création/modification et métadonnées JSONB. Le contrat PostgreSQL impose `scope_type = global` avec `scope_id IS NULL` pour les paramètres globaux, `scope_id IS NOT NULL` pour les scopes non globaux, et un index unique `NULLS NOT DISTINCT` sur `(namespace, key, scope_type, scope_id, status)` afin de garantir l'unicité logique des configurations globales malgré la sémantique PostgreSQL des valeurs NULL.
 
 ### auth_credentials
 
@@ -106,7 +106,7 @@ Demandes de réinitialisation de mot de passe avec token hashé, statut, expirat
 
 ### two_factor_settings et two_factor_challenges
 
-`two_factor_settings` décrit les règles 2FA configurables par scope. `two_factor_challenges` journalise les challenges émis, leur méthode, statut, compteur de tentatives et expiration.
+`two_factor_settings` décrit les règles 2FA configurables par scope. `two_factor_challenges` journalise les challenges émis, leur méthode, statut, compteur de tentatives, nombre maximal de tentatives, expiration et date de vérification. Le compteur `attempt_count` ne peut jamais être négatif.
 
 ### admin_access_logs
 
@@ -114,7 +114,7 @@ Journalise les accès administratifs sensibles, notamment Login As, avec acteur,
 
 ### Prisma et Neon PostgreSQL
 
-Prisma ORM est la cible de modélisation et de migrations versionnées. Neon est uniquement un fournisseur PostgreSQL. La logique métier ne dépend jamais de Neon. Les migrations devront être additives, testées avant production et compatibles avec une stratégie expand/contract.
+Prisma ORM est la cible de modélisation et de migrations versionnées. Neon est uniquement un fournisseur PostgreSQL. La logique métier ne dépend jamais de Neon. `database/schema.sql` reste un contrat documentaire aligné, non exécutable comme migration automatique. Toute future migration devra préserver explicitement les contraintes PostgreSQL non représentables directement par Prisma, notamment l'unicité `app_settings` avec `NULLS NOT DISTINCT`, et rester additive, testée avant production et compatible avec une stratégie expand/contract.
 
 ### Lecture runtime de configuration
 

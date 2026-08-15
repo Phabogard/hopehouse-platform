@@ -256,3 +256,81 @@ test('official docs keep auth security policies configurable through app setting
     assert.equal(documents.includes(requiredConcept), true, requiredConcept);
   }
 });
+
+
+test('database contract aligns app_settings and auth security Prisma/PostgreSQL safeguards', () => {
+  const schema = readProjectFile('database/schema.sql');
+  const prisma = readProjectFile('prisma/schema.prisma');
+  const databaseDoc = readProjectFile('docs/architecture-officielle/19-BASE-DE-DONNEES.md');
+  const securityDoc = readProjectFile('docs/architecture-officielle/16-SECURITE.md');
+
+  assert.equal(schema.includes('CREATE UNIQUE INDEX app_settings_unique_identity'), true);
+  assert.equal(schema.includes('NULLS NOT DISTINCT'), true);
+  assert.equal(schema.includes("CHECK ((scope_type = 'global' AND scope_id IS NULL) OR (scope_type <> 'global' AND scope_id IS NOT NULL))"), true);
+  assert.equal(prisma.includes('@@index([namespace, key, scopeType, scopeId, status])'), true);
+  assert.equal(prisma.includes('NULLS NOT DISTINCT unique index'), true);
+  assert.equal(databaseDoc.includes('NULLS NOT DISTINCT'), true);
+  assert.equal(securityDoc.includes('NULLS NOT DISTINCT'), true);
+});
+
+test('database contract preserves scoped app_settings coexistence without nullable-global duplicates', () => {
+  const schema = readProjectFile('database/schema.sql');
+
+  assert.equal(schema.includes("scope_type = 'global' AND scope_id IS NULL"), true);
+  assert.equal(schema.includes("scope_type <> 'global' AND scope_id IS NOT NULL"), true);
+  assert.equal(schema.includes('ON app_settings (namespace, key, scope_type, scope_id, status) NULLS NOT DISTINCT'), true);
+});
+
+test('database contract aligns two factor challenge safety fields with Prisma', () => {
+  const schema = readProjectFile('database/schema.sql');
+  const prisma = readProjectFile('prisma/schema.prisma');
+
+  assert.equal(schema.includes('attempt_count INTEGER NOT NULL CHECK (attempt_count >= 0)'), true);
+  assert.equal(schema.includes('max_attempts INTEGER NOT NULL CHECK (max_attempts > 0)'), true);
+  assert.equal(schema.includes('verified_at TIMESTAMPTZ'), true);
+  assert.equal(prisma.includes('maxAttempts   Int                      @map("max_attempts")'), true);
+  assert.equal(prisma.includes('verifiedAt    DateTime?                @map("verified_at")'), true);
+});
+
+test('database contract documents Prisma-aligned auth security indexes', () => {
+  const schema = readProjectFile('database/schema.sql');
+
+  for (const indexName of [
+    'app_settings_unique_identity',
+    'app_settings_namespace_key_status_idx',
+    'app_settings_scope_status_idx',
+    'app_settings_validity_idx',
+    'login_sessions_user_status_idx',
+    'login_sessions_device_status_idx',
+    'login_sessions_expires_at_idx',
+    'login_sessions_idle_expires_at_idx',
+    'login_sessions_revoked_at_idx',
+    'session_refresh_tokens_session_status_idx',
+    'session_refresh_tokens_expires_at_idx',
+    'session_refresh_tokens_replaced_by_idx',
+    'login_attempts_identifier_outcome_occurred_idx',
+    'login_attempts_user_occurred_idx',
+    'login_attempts_ip_occurred_idx',
+    'login_attempts_device_occurred_idx',
+    'security_events_user_occurred_idx',
+    'security_events_actor_occurred_idx',
+    'security_events_type_occurred_idx',
+    'security_events_severity_occurred_idx',
+    'security_events_related_entity_idx',
+    'password_reset_requests_identifier_created_idx',
+    'password_reset_requests_user_status_created_idx',
+    'password_reset_requests_status_expires_idx',
+    'two_factor_settings_scope_status_idx',
+    'two_factor_settings_method_status_idx',
+    'two_factor_challenges_user_status_created_idx',
+    'two_factor_challenges_status_expires_idx',
+    'two_factor_challenges_session_idx',
+    'two_factor_challenges_action_status_created_idx',
+    'admin_access_logs_actor_started_idx',
+    'admin_access_logs_target_started_idx',
+    'admin_access_logs_action_started_idx',
+    'admin_access_logs_session_idx',
+  ]) {
+    assert.equal(schema.includes(indexName), true, indexName);
+  }
+});

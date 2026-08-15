@@ -83,7 +83,7 @@ Le RBAC reste statique pendant cette phase et sera remplacé par le RBAC dynamiq
 
 ## Contrat runtime Auth/Security via app_settings
 
-La politique runtime Auth/Security est résolue depuis `ConfigurationService` et `app_settings` avec l'identité stricte suivante : namespace `auth-security`, key `runtime-policy`, scopeType `global`, scopeId `null`. Les scopes client, utilisateur ou tenant sont des préférences ou des paramètres de périmètre et ne peuvent pas remplacer cette politique système obligatoire.
+La politique runtime Auth/Security est résolue depuis `ConfigurationService` et `app_settings` avec l'identité stricte suivante : namespace `auth-security`, key `runtime-policy`, scopeType `global`, scopeId `null`. Le contrat PostgreSQL garantit cette unicité globale au niveau base par un index unique `NULLS NOT DISTINCT`, et pas uniquement par une règle applicative. Les scopes client, utilisateur ou tenant sont des préférences ou des paramètres de périmètre et ne peuvent pas remplacer cette politique système obligatoire.
 
 La valeur JSON attendue est un objet partiel dont les champs autorisés sont ceux du contrat `AuthSecurityPolicy` existant : `accessTokenTtlMs`, `refreshTokenTtlMs`, `sessionAbsoluteTtlMs`, `sessionIdleTtlMs`, `passwordResetTokenTtlMs`, `twoFactorChallengeTtlMs`, `twoFactorMaxAttempts`, `loginBlockThreshold`, `blockDurationMs`, `requireTwoFactor` et `refreshTokenReuseAction`. Aucun secret, rôle, identifiant demandeur ou paramètre HTTP ne fait partie de ce contrat.
 
