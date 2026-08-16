@@ -84,9 +84,9 @@ export class OpenAiResponsesClient implements AiChatProvider {
       }),
     });
 
-    if (!response.ok) {
-      const detail = await response.text();
-      throw new Error(`OpenAI Responses API error (${response.status}): ${detail.slice(0, 500)}`);
+    if (response.status < 200 || response.status >= 300) {
+      const detail = await response.json();
+      throw new Error(`OpenAI Responses API error (${response.status}): ${JSON.stringify(detail).slice(0, 500)}`);
     }
 
     const payload = await response.json() as ResponsesApiPayload;
