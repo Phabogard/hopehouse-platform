@@ -21,6 +21,30 @@ export interface AiChatClientOptions {
   fetchImpl?: typeof fetch;
 }
 
+interface ResponsesApiPayload {
+  output?: unknown;
+}
+
+function extractOutputText(payload: ResponsesApiPayload): string | null {
+  if (!Array.isArray(payload.output)) return null;
+
+  const textParts: string[] = [];
+  for (const item of payload.output) {
+    if (typeof item !== 'object' || item === null) continue;
+    const content = (item as { content?: unknown }).content;
+    if (!Array.isArray(content)) continue;
+    for (const part of content) {
+      if (typeof part !== 'object' || part === null) continue;
+      const type = (part as { type?: unknown }).type;
+      const text = (part as { text?: unknown }).text;
+      if (type === 'output_text' && typeof text === 'string') textParts.push(text);
+    }
+  }
+
+  const result = textParts.join('');
+  return result.trim().length > 0 ? result : null;
+}
+
 export class OpenAiResponsesClient implements AiChatProvider {
   private readonly apiKey: string;
   private readonly model: string;
@@ -65,12 +89,11 @@ export class OpenAiResponsesClient implements AiChatProvider {
       throw new Error(`OpenAI Responses API error (${response.status}): ${detail.slice(0, 500)}`);
     }
 
-    const payload = await response.json() as { output_text?: unknown };
-    if (typeof payload.output_text !== 'string' || payload.output_text.trim().length === 0) {
-      throw new Error('OpenAI Responses API n’a retourné aucun texte');
-    }
+    const payload = await response.json() as ResponsesApiPayload;
+    const text = extractOutputText(payload);
+    if (text === null) throw new Error('OpenAI Responses API n’a retourné aucun texte');
 
-    return Object.freeze({ text: payload.output_text, model: this.model });
+    return Object.freeze({ text, model: this.model });
   }
 }
 
