@@ -62,7 +62,7 @@ test('AI tool gateway requires human approval for L3', async () => {
     policy,
   );
   assert.equal(executed.status, 'executed');
-  assert.equal(executed.result.ok, true);
+  assert.equal(JSON.stringify(executed.result), JSON.stringify({ ok: true }));
 });
 
 test('AI tool gateway preserves server RBAC', async () => {
