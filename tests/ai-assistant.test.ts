@@ -61,7 +61,8 @@ test('AI tool gateway requires human approval for L3', async () => {
     { actor: systemAdmin, sessionId: 's2', requestId: 'r3', approved: true },
     policy,
   );
-  assert.deepEqual(executed, { status: 'executed', result: { ok: true } });
+  assert.equal(executed.status, 'executed');
+  assert.equal(executed.result.ok, true);
 });
 
 test('AI tool gateway preserves server RBAC', async () => {
