@@ -85,7 +85,7 @@ test('authenticated /ai/chat route delegates to the configured AI provider', asy
     assert.equal(response.status, 200);
     assert.equal(JSON.stringify(await response.json()), JSON.stringify({ data: { text: '4', model: 'test-model' } }));
   } finally {
-    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    await new Promise<void>((resolve) => server.close(() => resolve()));
     if (previous === undefined) delete process.env.HOPEHOUSE_AI_ENABLED;
     else process.env.HOPEHOUSE_AI_ENABLED = previous;
   }
