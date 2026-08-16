@@ -10,6 +10,7 @@ import { createServiceOffering } from './modules/services/services.js';
 import { createSubscription } from './modules/subscriptions/subscriptions.js';
 import { createUser } from './modules/users/users.js';
 import { AuthRuntimeContext, type AuthenticatedActor, type AuthenticatedLoginResult, type AuthRuntimeOptions } from './modules/auth-security/index.js';
+import { OpenAiResponsesClient, resolveLiveAiPolicy, type AiChatProvider } from './modules/ai-assistant/openai.js';
 
 const audit = new AuditLogService();
 const orderEngine = new OrderEngine();
@@ -38,6 +39,7 @@ type AuthRuntime = {
 export interface HopeHouseServerOptions {
   readonly auth?: AuthRuntimeOptions;
   readonly authRuntime?: AuthRuntime | null;
+  readonly aiClient?: AiChatProvider;
 }
 
 function sendJson(response: ServerResponse, statusCode: number, body: unknown): void {
@@ -120,7 +122,6 @@ async function authenticatedActor(auth: AuthRuntime | null, request: IncomingMes
   }
 }
 
-
 function requireAuthenticatedActor(actor: Actor | null): Actor {
   if (actor === null) throw new UnauthorizedError();
   return actor;
@@ -130,7 +131,7 @@ function isProtectedRoute(method: string | undefined, pathname: string): boolean
   if (method === 'POST' && pathname === '/orders') return true;
   if (method === 'POST' && pathname.match(/^\/orders\/[^/]+\/transitions$/) !== null) return true;
   if (method === 'GET' && ['/users', '/beneficiaries', '/services', '/subscriptions', '/payments', '/invoices', '/audit-logs'].includes(pathname)) return true;
-  if (method === 'POST' && ['/beneficiaries', '/payments'].includes(pathname)) return true;
+  if (method === 'POST' && ['/beneficiaries', '/payments', '/ai/chat'].includes(pathname)) return true;
   return false;
 }
 
@@ -151,6 +152,10 @@ function sensitiveAuditContext(method: string | undefined, pathname: string, act
 
   if (method === 'POST' && pathname.match(/^\/orders\/[^/]+\/transitions$/) !== null) {
     return { actorUserId: actor.id, action: 'order.transition', entityType: 'order' };
+  }
+
+  if (method === 'POST' && pathname === '/ai/chat') {
+    return { actorUserId: actor.id, action: 'ai.chat', entityType: 'ai_session' };
   }
 
   return null;
@@ -192,6 +197,7 @@ export function createHopeHouseServer(options: HopeHouseServerOptions = {}) {
   const auth = options.authRuntime !== undefined
     ? options.authRuntime
     : options.auth === undefined && process.env.HOPEHOUSE_JWT_SECRET === undefined ? null : new AuthRuntimeContext(options.auth);
+  const aiClient = options.aiClient ?? new OpenAiResponsesClient();
 
   return createServer(async (request: IncomingMessage, response: ServerResponse) => {
     const url = new URL(request.url ?? '/', 'http://localhost');
@@ -205,7 +211,6 @@ export function createHopeHouseServer(options: HopeHouseServerOptions = {}) {
     }
 
     try {
-
       if (request.method === 'POST' && url.pathname === '/auth/login') {
         const body = await readJsonBody(request);
         const login = await requireAuthContext(auth).login({
@@ -221,6 +226,15 @@ export function createHopeHouseServer(options: HopeHouseServerOptions = {}) {
       if (isProtectedRoute(request.method, url.pathname)) {
         actor = await authenticatedActor(auth, request);
         auditContext = sensitiveAuditContext(request.method, url.pathname, actor);
+      }
+
+      if (request.method === 'POST' && url.pathname === '/ai/chat') {
+        const currentActor = requireAuthenticatedActor(actor);
+        const body = await readJsonBody(request);
+        const result = await aiClient.chat(currentActor, stringField(body, 'message'), resolveLiveAiPolicy(currentActor));
+        audit.record({ actorUserId: currentActor.id, action: 'ai.chat', entityType: 'ai_session', entityId: 'conversation', outcome: 'success' });
+        sendJson(response, 200, { data: result });
+        return;
       }
 
       if (request.method === 'POST' && url.pathname === '/orders') {
