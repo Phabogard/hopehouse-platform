@@ -1,18 +1,28 @@
-# Migrations Prisma — Contrat de préparation
+# Migrations Prisma — Contrat officiel
 
-## Objectif
+## Statut normatif
 
-Ce document définit les conditions nécessaires avant la première migration Prisma versionnée de Hope House Platform. Il ne crée ni n'applique de migration et ne constitue pas une autorisation de modifier une base de production.
+Ce document définit le contrat de versionnement PostgreSQL de Hope House Platform. La première migration Prisma versionnée existe désormais et a été validée sur une branche PostgreSQL Neon temporaire avant application sur la branche `production`.
 
 ## Source canonique
 
-PostgreSQL est la cible de persistance. `prisma/schema.prisma` est le modèle ORM de référence. `database/schema.sql` est le contrat SQL documentaire qui doit rester sémantiquement équivalent au modèle Prisma et expliciter les contraintes PostgreSQL que Prisma ne sait pas représenter nativement.
+PostgreSQL est la cible de persistance. `prisma/schema.prisma` est le modèle ORM de référence. `database/schema.sql` reste le contrat SQL documentaire et doit rester sémantiquement équivalent au modèle Prisma, tout en explicitant les contraintes PostgreSQL que Prisma ne représente pas nativement.
+
+La migration versionnée correspondante est :
+
+`prisma/migrations/20260816133000_initial_postgresql_contract/migration.sql`
+
+Le verrou de fournisseur est :
+
+`prisma/migrations/migration_lock.toml`
 
 ## État actuel
 
-Le dépôt peut contenir un schéma Prisma cohérent avec le contrat PostgreSQL sans posséder encore de dossier `prisma/migrations`. L'absence de migration est volontaire tant que le contrat de persistance n'a pas été validé sur une base PostgreSQL réelle.
+Le schéma Prisma Auth/Security est maintenant versionné dans une première migration PostgreSQL. La migration a été exécutée sur une branche Neon temporaire, inspectée, puis appliquée sur la branche Neon `production` parce que cette base était vierge de tables applicatives.
 
-Aucune migration ne doit être générée par `prisma migrate`, et aucun `prisma db push` ne doit être utilisé pour contourner le versionnement, tant que les contrôles ci-dessous ne sont pas satisfaits.
+La branche Neon `phase-2-4-test` reste conservée comme environnement de test séparé.
+
+La migration n'est pas une autorisation de supprimer les branches Neon ni de lancer des opérations destructives.
 
 ## Contraintes PostgreSQL obligatoires
 
@@ -26,7 +36,7 @@ ON app_settings (namespace, key, scope_type, scope_id, status)
 NULLS NOT DISTINCT;
 ```
 
-Le contrat doit également imposer :
+Le contrat impose également :
 
 ```sql
 CHECK (
@@ -36,58 +46,70 @@ CHECK (
 )
 ```
 
-Cette protection ne doit pas être remplacée par une simple unicité Prisma, car Prisma ne représente pas directement `NULLS NOT DISTINCT`.
+Cette protection ne doit pas être remplacée par une simple unicité Prisma.
 
 ### two_factor_challenges
 
-La table doit conserver `max_attempts`, `verified_at` et :
+La table conserve `attempt_count`, `max_attempts`, `verified_at`, avec :
 
 ```sql
 CHECK (attempt_count >= 0)
+CHECK (max_attempts > 0)
 ```
 
-ainsi qu'une borne positive sur `max_attempts`.
+### Dates et JSON
 
-### Indexes Auth/Security
+Les champs temporels Prisma persistés utilisent explicitement `@db.Timestamptz(3)` afin de rester alignés sur `TIMESTAMPTZ(3)` PostgreSQL. Les valeurs structurées utilisent `JSONB`.
 
-Les indexes déclarés dans Prisma et documentés dans `database/schema.sql` doivent être présents dans la migration finale lorsqu'ils sont nécessaires aux parcours de résolution de configuration, expiration, révocation, blocage login et audit.
+## Validation réalisée
 
-### users / roles
+La migration a été testée sur une branche Neon temporaire avant application :
 
-La relation `users.role_id -> roles.id` doit être représentée dans Prisma et dans la migration PostgreSQL. Aucun nouveau système de RBAC dynamique n'est introduit par cette migration.
+1. Les 13 tables Prisma attendues ont été créées.
+2. L'index `app_settings_unique_identity` a été vérifié avec `NULLS NOT DISTINCT`.
+3. Les CHECK `app_settings.scope_type/scope_id` ont été vérifiés.
+4. Les CHECK `two_factor_challenges.attempt_count` et `max_attempts` ont été vérifiés.
+5. Les colonnes temporelles ont été vérifiées en `timestamptz`.
+6. La migration temporaire a été supprimée après validation.
+7. La même migration a ensuite été appliquée à Neon `production`.
+
+## Historique Prisma
+
+Le fichier de migration est versionné dans Git. La base `production` a reçu le SQL exact de cette migration par le mécanisme contrôlé de migration Neon.
+
+La table `_prisma_migrations` doit être initialisée par `prisma migrate resolve --applied 20260816133000_initial_postgresql_contract` depuis un environnement disposant de `DATABASE_URL`, afin que l'historique Prisma reconnaisse que le schéma de production correspond déjà à cette migration. Cette opération de résolution ne doit pas réexécuter le SQL.
+
+Après cette résolution, les déploiements futurs doivent utiliser `prisma migrate deploy` et non `prisma db push`.
 
 ## Types de données
 
-Les dates de persistance doivent utiliser les types temporels PostgreSQL correspondants (`TIMESTAMPTZ` dans le contrat SQL), et les valeurs structurées doivent utiliser `JSONB` lorsque le contrat les définit comme JSON. Les représentations `TEXT` historiques de dates ou JSON ne doivent pas être réintroduites dans une nouvelle migration.
+Les dates de persistance doivent utiliser les types temporels PostgreSQL correspondants (`TIMESTAMPTZ(3)`), et les valeurs structurées doivent utiliser `JSONB` lorsque le contrat les définit comme JSON. Les représentations `TEXT` historiques de dates ou JSON ne doivent pas être réintroduites dans une nouvelle migration.
 
-## Stratégie de validation avant application
+## Stratégie pour les prochaines migrations
 
-1. Exécuter `prisma validate` avec une `DATABASE_URL` factice de type PostgreSQL si aucune connexion réelle n'est nécessaire.
-2. Générer la migration dans une branche dédiée et inspecter entièrement le SQL produit.
-3. Vérifier que la migration crée toutes les tables, FK, uniques, checks et indexes attendus.
-4. Vérifier manuellement que `NULLS NOT DISTINCT` est présent pour `app_settings`.
-5. Vérifier que `two_factor_challenges.max_attempts` et `verified_at` sont créés.
-6. Appliquer la migration sur une base PostgreSQL de test vierge.
-7. Exécuter les tests de cohérence et les tests runtime.
-8. Tester un second scénario avec des données compatibles existantes avant toute migration de production.
-9. Vérifier `git diff --check`, `npm test`, `npm run build` et `git status --short --branch`.
-10. Seulement après validation, ouvrir une PR de migration ciblée.
+1. Modifier le modèle Prisma et/ou le contrat SQL documentaire.
+2. Générer une migration dans un environnement de développement ou une branche dédiée.
+3. Inspecter entièrement le SQL produit.
+4. Préserver manuellement toute contrainte PostgreSQL non représentable directement par Prisma.
+5. Appliquer la migration sur PostgreSQL de test.
+6. Exécuter les tests de cohérence, runtime et intégration concernés.
+7. Vérifier `git diff --check`, `npm test`, `npm run build` et `git status --short --branch`.
+8. Après validation, déployer avec `prisma migrate deploy` dans les environnements concernés.
 
 ## Données existantes et expand/contract
 
-La première migration doit être compatible avec les données déjà persistées. Toute conversion de `TEXT` vers `TIMESTAMPTZ` ou `JSONB` sur une base existante doit être traitée comme une opération de données distincte et validée; elle ne doit pas être déduite automatiquement du schéma documentaire.
-
-Les migrations destructives, les suppressions de colonnes non nécessaires, les changements silencieux de sémantique et les modifications de secrets sont interdits dans ce lot de préparation.
+Toute conversion de type sur une base contenant déjà des données doit être traitée comme une opération de données distincte et validée. Les migrations destructives, les suppressions de colonnes non nécessaires, les changements silencieux de sémantique et les modifications de secrets sont interdits sans lot dédié et validation explicite.
 
 ## Interdictions
 
-- Aucun `prisma db push` comme mécanisme de migration.
-- Aucune migration appliquée à une base de production depuis cette mission.
+- Aucun `prisma db push` comme mécanisme de migration de production.
+- Aucun `prisma migrate dev` sur la base de production.
+- Aucune migration destructive dans un lot ordinaire.
 - Aucun secret, `.env`, JWT secret ou credential dans Git.
-- Aucun CRUD admin de `app_settings`.
-- Aucun RBAC dynamique.
-- Aucun changement Wallet / Order Engine / Payments.
+- Aucun CRUD admin de `app_settings` dans le lot de migration.
+- Aucun RBAC dynamique introduit par une migration.
+- Aucun changement Wallet / Order Engine / Payments dans le lot de migration Auth/Security.
 
 ## Critère de sortie
 
-La mission de préparation est terminée lorsque le schéma Prisma, le contrat PostgreSQL documentaire et le SQL de migration généré sont vérifiés ensemble sur PostgreSQL de test, avec conservation explicite des contraintes non représentables directement par Prisma. L'absence de `prisma/migrations` avant cette validation est normale et intentionnelle.
+Le contrat de préparation est considéré comme établi lorsque le schéma Prisma, le contrat SQL documentaire, la migration versionnée et PostgreSQL de production sont cohérents, avec conservation explicite des contraintes non représentables directement par Prisma. L'étape opérationnelle restante est uniquement la résolution de l'historique `_prisma_migrations` depuis un environnement disposant de `DATABASE_URL`.
