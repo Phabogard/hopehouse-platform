@@ -9,7 +9,9 @@
     "dev": "npm run build && node dist/src/server.js",
     "start": "node dist/src/server.js",
     "test": "npm run build && node --test dist/tests/*.test.js",
-    "prisma:generate": "prisma generate"
+    "prisma:generate": "prisma generate",
+    "prisma:migrate:deploy": "prisma migrate deploy",
+    "prisma:migrate:status": "prisma migrate status"
   },
   "engines": {
     "node": ">=20.0.0"
