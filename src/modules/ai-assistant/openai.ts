@@ -10,6 +10,10 @@ export interface AiChatResult {
   model: string;
 }
 
+export interface AiChatProvider {
+  chat(actor: Actor, message: string, policy: AiPolicy): Promise<AiChatResult>;
+}
+
 export interface AiChatClientOptions {
   apiKey?: string;
   model?: string;
@@ -17,7 +21,7 @@ export interface AiChatClientOptions {
   fetchImpl?: typeof fetch;
 }
 
-export class OpenAiResponsesClient {
+export class OpenAiResponsesClient implements AiChatProvider {
   private readonly apiKey: string;
   private readonly model: string;
   private readonly baseUrl: string;
