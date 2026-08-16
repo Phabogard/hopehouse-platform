@@ -20,7 +20,9 @@ test('OpenAI Responses provider sends only server-side credentials and returns o
     fetchImpl: async (input, init) => {
       requestUrl = String(input);
       requestBody = String(init?.body ?? '');
-      return new Response(JSON.stringify({ output_text: 'Bonjour HopeHouse.' }), { status: 200 });
+      return new Response(JSON.stringify({
+        output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'Bonjour HopeHouse.' }] }],
+      }), { status: 200 });
     },
   });
 
