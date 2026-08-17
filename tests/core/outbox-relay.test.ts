@@ -1,4 +1,5 @@
-import { describe, expect, it, vi } from "vitest";
+import assert from "node:assert/strict";
+import { describe, it } from "node:test";
 import {
   OutboxRelay,
   calculateExponentialBackoff,
@@ -25,46 +26,64 @@ const message: OutboxMessage = {
 
 describe("OutboxRelay", () => {
   it("uses bounded exponential backoff", () => {
-    expect(calculateExponentialBackoff(0)).toBe(1_000);
-    expect(calculateExponentialBackoff(1)).toBe(2_000);
-    expect(calculateExponentialBackoff(10)).toBe(1_024_000);
-    expect(calculateExponentialBackoff(100)).toBe(1_024_000);
+    assert.equal(calculateExponentialBackoff(0), 1_000);
+    assert.equal(calculateExponentialBackoff(1), 2_000);
+    assert.equal(calculateExponentialBackoff(10), 1_024_000);
+    assert.equal(calculateExponentialBackoff(100), 1_024_000);
   });
 
   it("publishes claimed messages and marks them published", async () => {
+    const published: OutboxMessage[] = [];
+    let publishedCount = 0;
+    let failedCount = 0;
     const store: OutboxStore = {
-      claimBatch: vi.fn().mockResolvedValue([message]),
-      markPublished: vi.fn().mockResolvedValue(undefined),
-      markFailed: vi.fn().mockResolvedValue(undefined),
+      claimBatch: async () => [message],
+      markPublished: async (eventId) => {
+        publishedCount += 1;
+        assert.equal(eventId, "evt-1");
+      },
+      markFailed: async () => {
+        failedCount += 1;
+      },
     };
     const publisher: EventPublisher = {
-      publish: vi.fn().mockResolvedValue(undefined),
+      publish: async (event) => {
+        published.push(event);
+      },
     };
 
     const count = await new OutboxRelay(store, publisher).processBatch(new Date(1_000));
 
-    expect(count).toBe(1);
-    expect(publisher.publish).toHaveBeenCalledWith(message);
-    expect(store.markPublished).toHaveBeenCalledTimes(1);
-    expect(store.markFailed).not.toHaveBeenCalled();
+    assert.equal(count, 1);
+    assert.deepEqual(published, [message]);
+    assert.equal(publishedCount, 1);
+    assert.equal(failedCount, 0);
   });
 
   it("records a retry after publication failure", async () => {
+    let failedEventId = "";
+    let failedError: Error | undefined;
+    let failedAt: Date | undefined;
     const store: OutboxStore = {
-      claimBatch: vi.fn().mockResolvedValue([{ ...message, attempts: 1 }]),
-      markPublished: vi.fn().mockResolvedValue(undefined),
-      markFailed: vi.fn().mockResolvedValue(undefined),
+      claimBatch: async () => [{ ...message, attempts: 1 }],
+      markPublished: async () => undefined,
+      markFailed: async (eventId, error, nextAttemptAt) => {
+        failedEventId = eventId;
+        failedError = error;
+        failedAt = nextAttemptAt;
+      },
     };
     const publisher: EventPublisher = {
-      publish: vi.fn().mockRejectedValue(new Error("broker unavailable")),
+      publish: async () => {
+        throw new Error("broker unavailable");
+      },
     };
 
     const count = await new OutboxRelay(store, publisher).processBatch(new Date(1_000));
 
-    expect(count).toBe(0);
-    expect(store.markFailed).toHaveBeenCalledTimes(1);
-    expect(store.markFailed.mock.calls[0]?.[0]).toBe("evt-1");
-    expect(store.markFailed.mock.calls[0]?.[1]).toBeInstanceOf(Error);
-    expect(store.markFailed.mock.calls[0]?.[2]).toEqual(new Date(3_000));
+    assert.equal(count, 0);
+    assert.equal(failedEventId, "evt-1");
+    assert.ok(failedError instanceof Error);
+    assert.deepEqual(failedAt, new Date(3_000));
   });
 });
