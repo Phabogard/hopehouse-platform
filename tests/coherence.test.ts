@@ -291,9 +291,9 @@ test('database contract aligns two factor challenge safety fields with Prisma', 
   assert.equal(schema.includes('attempt_count INTEGER NOT NULL CHECK (attempt_count >= 0)'), true);
   assert.equal(schema.includes('max_attempts INTEGER NOT NULL CHECK (max_attempts > 0)'), true);
   assert.equal(schema.includes('verified_at TIMESTAMPTZ'), true);
-  assert.equal(prisma.includes('attemptCount  Int                      @map("attempt_count")'), true);
-  assert.equal(prisma.includes('maxAttempts   Int                      @map("max_attempts")'), true);
-  assert.equal(prisma.includes('verifiedAt    DateTime?                @map("verified_at")'), true);
+  assert.equal(/attemptCount\s+Int\s+@map\("attempt_count"\)/.test(prisma), true);
+  assert.equal(/maxAttempts\s+Int\s+@map\("max_attempts"\)/.test(prisma), true);
+  assert.equal(/verifiedAt\s+DateTime\?\s+@db\.Timestamptz\(3\)\s+@map\("verified_at"\)/.test(prisma), true);
 });
 
 test('database contract documents Prisma-aligned auth security indexes', () => {
