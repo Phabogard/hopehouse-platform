@@ -1,6 +1,8 @@
 export type { Entity, UniqueId } from "./domain/entity";
 export { BaseEntity } from "./domain/entity";
 export type { DomainEvent, DomainEventEnvelope } from "./events/domain-event";
+export type { OutboxMessage, OutboxStore } from "./events/outbox";
+export type { OutboxRepository } from "./events/outbox-repository";
 export { ConcurrencyConflictError, assertExpectedVersion } from "./concurrency/optimistic-concurrency";
 export type { VersionedAggregate } from "./concurrency/optimistic-concurrency";
 export type { IdempotencyRecord, IdempotencyStore } from "./idempotency/idempotency";
