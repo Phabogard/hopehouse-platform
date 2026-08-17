@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import assert from "node:assert/strict";
+import { describe, it } from "node:test";
 import {
   DomainError,
   assertExpectedVersion,
@@ -9,15 +10,15 @@ import {
 
 describe("shared kernel", () => {
   it("accepts a matching optimistic concurrency version", () => {
-    expect(() => assertExpectedVersion(3, 3)).not.toThrow();
+    assert.doesNotThrow(() => assertExpectedVersion(3, 3));
   });
 
   it("rejects a stale optimistic concurrency version", () => {
-    expect(() => assertExpectedVersion(3, 4)).toThrow(ConcurrencyConflictError);
+    assert.throws(() => assertExpectedVersion(3, 4), ConcurrencyConflictError);
   });
 
   it("provides an injectable system clock", () => {
-    expect(systemClock.now()).toBeInstanceOf(Date);
+    assert.ok(systemClock.now() instanceof Date);
   });
 
   it("preserves the domain event envelope contract", () => {
@@ -33,13 +34,13 @@ describe("shared kernel", () => {
       payload: { value: 1 },
     };
 
-    expect(event.payload.value).toBe(1);
-    expect(event.schemaVersion).toBe(1);
+    assert.equal(event.payload.value, 1);
+    assert.equal(event.schemaVersion, 1);
   });
 
   it("represents domain failures without infrastructure details", () => {
     const error = new DomainError("Invalid state", "INVALID_STATE", { state: "x" });
-    expect(error.code).toBe("INVALID_STATE");
-    expect(error.details).toEqual({ state: "x" });
+    assert.equal(error.code, "INVALID_STATE");
+    assert.deepEqual(error.details, { state: "x" });
   });
 });
