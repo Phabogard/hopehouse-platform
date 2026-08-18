@@ -13,4 +13,4 @@ export type { VersionedAggregate } from "./concurrency/optimistic-concurrency.js
 export type { IdempotencyRecord, IdempotencyStore } from "./idempotency/idempotency.js";
 export type { Clock } from "./time/clock.js";
 export { systemClock } from "./time/clock.js";
-export { DomainError } from "./errors/domain-error.js";
+export { DomainError } from "./errors.js";
