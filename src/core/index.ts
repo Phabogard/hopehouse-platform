@@ -19,3 +19,20 @@ export {
   ForbiddenError,
   ValidationError,
 } from "./errors.js";
+export {
+  COMPOSER_ACTIONS,
+  validateComposerPayload,
+} from "./messaging/composer-actions.js";
+export type {
+  ComposerAction,
+  ComposerCapabilitySet,
+  ComposerPayload,
+  DocumentAttachmentPayload,
+  GalleryAttachmentPayload,
+  CatalogueReferencePayload,
+  QuickReplyPayload,
+  LocationPayload,
+  ContactPayload,
+  PollPayload,
+  EventPayload,
+} from "./messaging/composer-actions.js";
