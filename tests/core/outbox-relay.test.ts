@@ -7,6 +7,7 @@ import {
   type OutboxMessage,
   type OutboxStore,
 } from "../../src/core/outbox/outbox.js";
+import type { DomainEventEnvelope } from "../../src/core/events/domain-event.js";
 
 const message: OutboxMessage = {
   eventId: "evt-1",
@@ -35,7 +36,7 @@ describe("OutboxRelay", () => {
   });
 
   it("publishes claimed messages and marks them published", async () => {
-    const published: OutboxMessage[] = [];
+    const published: DomainEventEnvelope[] = [];
     let publishedCount = 0;
     let failedCount = 0;
     const store: OutboxStore = {
