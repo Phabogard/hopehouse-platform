@@ -8,11 +8,12 @@ const actor: Actor = { id: "client-1", role: "client" };
 
 test("composer manifest exposes the eight actions in screen order", () => {
   const manifest = buildComposerManifest(actor, defaultComposerCapabilities);
+  const expected = ["document", "gallery", "catalogue", "quick_reply", "location", "contact", "poll", "event"];
 
-  assert.deepEqual(
-    manifest.actions.map((action) => action.action),
-    ["document", "gallery", "catalogue", "quick_reply", "location", "contact", "poll", "event"],
-  );
+  assert.equal(manifest.actions.length, expected.length);
+  for (let index = 0; index < expected.length; index += 1) {
+    assert.equal(manifest.actions[index]?.action, expected[index]);
+  }
   assert.equal(composerActionDefinitions.length, 8);
 });
 
