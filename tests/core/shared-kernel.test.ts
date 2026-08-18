@@ -40,7 +40,9 @@ describe("shared kernel", () => {
 
   it("represents domain failures without infrastructure details", () => {
     const error = new DomainError("Invalid state", "INVALID_STATE", 400, { state: "x" });
+    assert.equal(error.message, "Invalid state");
     assert.equal(error.code, "INVALID_STATE");
+    assert.equal(error.statusCode, 400);
     assert.deepEqual(error.details, { state: "x" });
   });
 });
