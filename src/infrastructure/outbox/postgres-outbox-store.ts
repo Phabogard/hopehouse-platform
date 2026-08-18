@@ -1,5 +1,5 @@
-import type { DomainEventEnvelope } from "../../core/events/domain-event";
-import type { OutboxMessage, OutboxStore } from "../../core/outbox/outbox";
+import type { DomainEventEnvelope } from "../../core/events/domain-event.js";
+import type { OutboxMessage, OutboxStore } from "../../core/outbox/outbox.js";
 
 type SqlExecutor = {
   $queryRawUnsafe<T = unknown>(query: string, ...values: unknown[]): Promise<T>;
