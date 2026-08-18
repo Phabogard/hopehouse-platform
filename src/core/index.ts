@@ -36,3 +36,15 @@ export type {
   PollPayload,
   EventPayload,
 } from "./messaging/composer-actions.js";
+export {
+  createComposerState,
+  setComposerDraft,
+  openComposerActions,
+  closeComposerActions,
+  selectComposerAction,
+  attachComposerPayload,
+  cancelComposerAction,
+  confirmComposerAction,
+  defaultComposerCapabilities,
+} from "./messaging/composer-state.js";
+export type { ComposerState } from "./messaging/composer-state.js";
