@@ -1,4 +1,4 @@
-import type { DomainEventEnvelope } from "../events/domain-event";
+import type { DomainEventEnvelope } from "../events/domain-event.js";
 
 export interface OutboxMessage<TPayload = unknown> extends DomainEventEnvelope<TPayload> {
   readonly attempts: number;
