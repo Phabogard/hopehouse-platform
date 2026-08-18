@@ -93,10 +93,14 @@ export interface ComposerCapabilitySet {
   readonly event: boolean;
 }
 
+function isValidDate(value: string): boolean {
+  return !Number.isNaN(Date.parse(value));
+}
+
 export function validateComposerPayload(input: ComposerPayload): void {
   switch (input.action) {
     case "document":
-      if (!input.payload.mediaFileId || !input.payload.fileName || !input.payload.mimeType) {
+      if (!input.payload.mediaFileId || !input.payload.fileName.trim() || !input.payload.mimeType.trim()) {
         throw new Error("Invalid document attachment payload");
       }
       if (!Number.isSafeInteger(input.payload.sizeBytes) || input.payload.sizeBytes < 0) {
@@ -105,13 +109,13 @@ export function validateComposerPayload(input: ComposerPayload): void {
       return;
 
     case "gallery":
-      if (input.payload.mediaFileIds.length === 0) {
+      if (input.payload.mediaFileIds.length === 0 || input.payload.mediaFileIds.some((id) => !id)) {
         throw new Error("Gallery attachment must contain at least one media file");
       }
       return;
 
     case "catalogue":
-      if (!input.payload.catalogueItemId || !Number.isSafeInteger(input.payload.catalogueVersion) || input.payload.catalogueVersion < 1) {
+      if (!input.payload.catalogueItemId || !Number.isSafeInteger(input.payload.catalogueVersion) || input.payload.catalogueVersion < 1 || !input.payload.title.trim()) {
         throw new Error("Invalid catalogue reference");
       }
       return;
@@ -122,14 +126,22 @@ export function validateComposerPayload(input: ComposerPayload): void {
       }
       return;
 
-    case "location":
-      if (input.payload.latitude < -90 || input.payload.latitude > 90 || input.payload.longitude < -180 || input.payload.longitude > 180) {
+    case "location": {
+      const { latitude, longitude, accuracyMeters, sharingMode, expiresAt } = input.payload;
+      if (!Number.isFinite(latitude) || !Number.isFinite(longitude) || latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180) {
         throw new Error("Invalid location coordinates");
       }
-      if (input.payload.sharingMode === "live" && !input.payload.expiresAt) {
-        throw new Error("Live location requires an expiration time");
+      if (accuracyMeters !== undefined && (!Number.isFinite(accuracyMeters) || accuracyMeters < 0)) {
+        throw new Error("Invalid location accuracy");
+      }
+      if (sharingMode === "live" && (!expiresAt || !isValidDate(expiresAt) || Date.parse(expiresAt) <= Date.now())) {
+        throw new Error("Live location requires a future expiration time");
+      }
+      if (sharingMode === "point" && expiresAt !== undefined && !isValidDate(expiresAt)) {
+        throw new Error("Invalid location expiration time");
       }
       return;
+    }
 
     case "contact":
       if (!input.payload.contactId || !input.payload.displayName.trim()) {
@@ -137,16 +149,24 @@ export function validateComposerPayload(input: ComposerPayload): void {
       }
       return;
 
-    case "poll":
-      if (!input.payload.question.trim() || input.payload.options.length < 2) {
-        throw new Error("A poll requires a question and at least two options");
+    case "poll": {
+      const normalizedOptions = input.payload.options.map((option) => option.trim()).filter(Boolean);
+      const uniqueOptions = new Set(normalizedOptions);
+      if (!input.payload.question.trim() || normalizedOptions.length < 2 || uniqueOptions.size !== normalizedOptions.length) {
+        throw new Error("A poll requires a question and at least two distinct options");
+      }
+      if (input.payload.closesAt !== undefined && (!isValidDate(input.payload.closesAt) || Date.parse(input.payload.closesAt) <= Date.now())) {
+        throw new Error("Poll closing time must be in the future");
       }
       return;
+    }
 
-    case "event":
-      if (!input.payload.eventId || !input.payload.title.trim() || !input.payload.startsAt || !input.payload.endsAt || !input.payload.timezone) {
-        throw new Error("Invalid event payload");
+    case "event": {
+      const { eventId, title, startsAt, endsAt, timezone } = input.payload;
+      if (!eventId || !title.trim() || !timezone.trim() || !isValidDate(startsAt) || !isValidDate(endsAt) || Date.parse(endsAt) <= Date.parse(startsAt)) {
+        throw new Error("Invalid event payload or event time range");
       }
       return;
+    }
   }
 }
