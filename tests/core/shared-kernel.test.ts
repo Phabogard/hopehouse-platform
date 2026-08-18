@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { DomainError } from "../../src/core/errors/domain-error.js";
+import { DomainError } from "../../src/core/errors.js";
 import {
   assertExpectedVersion,
   ConcurrencyConflictError,
@@ -39,7 +39,7 @@ describe("shared kernel", () => {
   });
 
   it("represents domain failures without infrastructure details", () => {
-    const error = new DomainError("Invalid state", "INVALID_STATE", { state: "x" });
+    const error = new DomainError("Invalid state", "INVALID_STATE", 400, { state: "x" });
     assert.equal(error.code, "INVALID_STATE");
     assert.deepEqual(error.details, { state: "x" });
   });
