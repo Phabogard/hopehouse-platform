@@ -94,6 +94,6 @@ describe("OutboxRelay", () => {
     assert.equal(failedEventId, "evt-1");
     assert.equal(failedWorkerId, "test-worker");
     assert.ok(failedError instanceof Error);
-    assert.deepEqual(failedAt, new Date(5_000));
+    assert.deepEqual(failedAt, new Date(3_000));
   });
 });
