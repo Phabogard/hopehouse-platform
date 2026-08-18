@@ -12,13 +12,19 @@ CREATE TABLE "outbox_messages" (
   "available_at" TIMESTAMPTZ(3) NOT NULL,
   "published_at" TIMESTAMPTZ(3),
   "last_error" TEXT,
+  "lease_owner" TEXT,
+  "lease_until" TIMESTAMPTZ(3),
   "created_at" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
   CONSTRAINT "outbox_messages_pkey" PRIMARY KEY ("id")
 );
 
 CREATE INDEX "outbox_messages_pending_idx"
-  ON "outbox_messages" ("available_at", "created_at")
+  ON "outbox_messages" ("available_at", "created_at", "id")
+  WHERE "published_at" IS NULL;
+
+CREATE INDEX "outbox_messages_lease_idx"
+  ON "outbox_messages" ("lease_until")
   WHERE "published_at" IS NULL;
 
 CREATE INDEX "outbox_messages_correlation_idx"
