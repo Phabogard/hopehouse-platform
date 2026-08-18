@@ -41,7 +41,11 @@ declare module 'node:http' {
 declare module 'node:assert/strict' {
   const assert: {
     equal(actual: unknown, expected: unknown, message?: string): void;
-    throws(block: () => unknown, expected?: RegExp, message?: string): void;
+    strictEqual(actual: unknown, expected: unknown, message?: string): void;
+    deepEqual(actual: unknown, expected: unknown, message?: string): void;
+    ok(value: unknown, message?: string): void;
+    throws(block: () => unknown, expected?: RegExp | (new (...args: never[]) => Error), message?: string): void;
+    doesNotThrow(block: () => unknown, message?: string): void;
   };
   export default assert;
 }
