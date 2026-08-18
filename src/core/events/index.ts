@@ -1,1 +1,1 @@
-export type { DomainEvent, DomainEventEnvelope } from "./domain-event";
+export type { DomainEvent, DomainEventEnvelope } from "./domain-event.js";
