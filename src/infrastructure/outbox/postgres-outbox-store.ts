@@ -25,7 +25,7 @@ export class PostgresOutboxStore<TPayload = unknown>
         WHERE published_at IS NULL
           AND available_at <= $1
           AND (lease_until IS NULL OR lease_until <= $1)
-        ORDER BY created_at
+        ORDER BY created_at, id
         FOR UPDATE SKIP LOCKED
         LIMIT $2
       )
@@ -101,22 +101,41 @@ export class PostgresOutboxStore<TPayload = unknown>
       return value;
     };
 
+    const dateValue = (key: string): string => {
+      const value = row[key];
+      if (value instanceof Date) {
+        return value.toISOString();
+      }
+      if (typeof value === "string") {
+        const date = new Date(value);
+        if (!Number.isNaN(date.getTime())) {
+          return date.toISOString();
+        }
+      }
+      throw new Error(`Invalid outbox row: ${key} must be a timestamp`);
+    };
+
+    const nullableDateValue = (key: string): string | null => {
+      const value = row[key];
+      return value === null || value === undefined ? null : dateValue(key);
+    };
+
     return {
       eventId: stringValue("id"),
       eventType: stringValue("event_type"),
       schemaVersion: Number(row.schema_version),
-      occurredAt: stringValue("created_at"),
+      occurredAt: dateValue("occurred_at"),
       correlationId: stringValue("correlation_id"),
       causationId: row.causation_id === null ? null : String(row.causation_id),
       aggregateId: stringValue("aggregate_id"),
       aggregateType: stringValue("aggregate_type"),
       payload: row.payload_json as TPayload,
       attempts: Number(row.attempts),
-      availableAt: stringValue("available_at"),
-      publishedAt: row.published_at === null ? null : String(row.published_at),
+      availableAt: dateValue("available_at"),
+      publishedAt: nullableDateValue("published_at"),
       lastError: row.last_error === null ? null : String(row.last_error),
       leaseOwner: row.lease_owner === null ? null : String(row.lease_owner),
-      leaseUntil: row.lease_until === null ? null : String(row.lease_until),
+      leaseUntil: nullableDateValue("lease_until"),
     };
   }
 }
