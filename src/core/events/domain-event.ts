@@ -1,4 +1,4 @@
-import type { UniqueId } from "../domain/entity";
+import type { UniqueId } from "../domain/entity.js";
 
 export interface DomainEventEnvelope<TPayload = unknown> {
   readonly eventId: UniqueId;
