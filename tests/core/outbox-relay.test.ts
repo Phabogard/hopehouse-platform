@@ -6,7 +6,7 @@ import {
   type EventPublisher,
   type OutboxMessage,
   type OutboxStore,
-} from "../../src/core/outbox/outbox";
+} from "../../src/core/outbox/outbox.js";
 
 const message: OutboxMessage = {
   eventId: "evt-1",
@@ -22,6 +22,8 @@ const message: OutboxMessage = {
   availableAt: new Date(0).toISOString(),
   publishedAt: null,
   lastError: null,
+  leaseOwner: null,
+  leaseUntil: null,
 };
 
 describe("OutboxRelay", () => {
@@ -38,9 +40,10 @@ describe("OutboxRelay", () => {
     let failedCount = 0;
     const store: OutboxStore = {
       claimBatch: async () => [message],
-      markPublished: async (eventId) => {
+      markPublished: async (eventId, workerId) => {
         publishedCount += 1;
         assert.equal(eventId, "evt-1");
+        assert.equal(workerId, "test-worker");
       },
       markFailed: async () => {
         failedCount += 1;
@@ -52,7 +55,9 @@ describe("OutboxRelay", () => {
       },
     };
 
-    const count = await new OutboxRelay(store, publisher).processBatch(new Date(1_000));
+    const count = await new OutboxRelay(store, publisher, { workerId: "test-worker" }).processBatch(
+      new Date(1_000),
+    );
 
     assert.equal(count, 1);
     assert.deepEqual(published, [message]);
@@ -62,13 +67,15 @@ describe("OutboxRelay", () => {
 
   it("records a retry after publication failure", async () => {
     let failedEventId = "";
+    let failedWorkerId = "";
     let failedError: Error | undefined;
     let failedAt: Date | undefined;
     const store: OutboxStore = {
       claimBatch: async () => [{ ...message, attempts: 1 }],
       markPublished: async () => undefined,
-      markFailed: async (eventId, error, nextAttemptAt) => {
+      markFailed: async (eventId, workerId, error, nextAttemptAt) => {
         failedEventId = eventId;
+        failedWorkerId = workerId;
         failedError = error;
         failedAt = nextAttemptAt;
       },
@@ -79,11 +86,14 @@ describe("OutboxRelay", () => {
       },
     };
 
-    const count = await new OutboxRelay(store, publisher).processBatch(new Date(1_000));
+    const count = await new OutboxRelay(store, publisher, { workerId: "test-worker" }).processBatch(
+      new Date(1_000),
+    );
 
     assert.equal(count, 0);
     assert.equal(failedEventId, "evt-1");
+    assert.equal(failedWorkerId, "test-worker");
     assert.ok(failedError instanceof Error);
-    assert.deepEqual(failedAt, new Date(3_000));
+    assert.deepEqual(failedAt, new Date(5_000));
   });
 });
