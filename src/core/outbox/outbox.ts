@@ -31,7 +31,6 @@ export interface EventPublisher<TPayload = unknown> {
 
 export interface OutboxRelayOptions {
   readonly batchSize?: number;
-  readonly maxAttempts?: number;
   readonly baseBackoffMs?: number;
   readonly leaseMs?: number;
   readonly workerId: string;
@@ -54,7 +53,6 @@ export class OutboxRelay<TPayload = unknown> {
 
   async processBatch(now = new Date()): Promise<number> {
     const batchSize = this.options.batchSize ?? 50;
-    const maxAttempts = this.options.maxAttempts ?? 10;
     const baseBackoffMs = this.options.baseBackoffMs ?? 1_000;
     const leaseMs = this.options.leaseMs ?? 30_000;
     const messages = await this.store.claimBatch(
@@ -71,17 +69,15 @@ export class OutboxRelay<TPayload = unknown> {
         await this.store.markPublished(message.eventId, this.options.workerId, now);
         published += 1;
       } catch (error) {
-        if (message.attempts < maxAttempts) {
-          const nextAttempt = new Date(
-            now.getTime() + calculateExponentialBackoff(message.attempts, baseBackoffMs),
-          );
-          await this.store.markFailed(
-            message.eventId,
-            this.options.workerId,
-            error instanceof Error ? error : new Error(String(error)),
-            nextAttempt,
-          );
-        }
+        const nextAttempt = new Date(
+          now.getTime() + calculateExponentialBackoff(message.attempts, baseBackoffMs),
+        );
+        await this.store.markFailed(
+          message.eventId,
+          this.options.workerId,
+          error instanceof Error ? error : new Error(String(error)),
+          nextAttempt,
+        );
       }
     }
 
