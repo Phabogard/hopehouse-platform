@@ -6,7 +6,7 @@ import {
   ConcurrencyConflictError,
   systemClock,
   type DomainEvent,
-} from "../../src/core";
+} from "../../src/core/index.js";
 
 describe("shared kernel", () => {
   it("accepts a matching optimistic concurrency version", () => {
