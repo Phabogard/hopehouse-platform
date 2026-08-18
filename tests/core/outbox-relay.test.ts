@@ -1,0 +1,100 @@
+import assert from "node:assert/strict";
+import { describe, it } from "node:test";
+import {
+  OutboxRelay,
+  calculateExponentialBackoff,
+  type EventPublisher,
+  type OutboxMessage,
+  type OutboxStore,
+} from "../../src/core/outbox/outbox.js";
+import type { DomainEventEnvelope } from "../../src/core/events/domain-event.js";
+
+const message: OutboxMessage = {
+  eventId: "evt-1",
+  eventType: "ExampleCreated",
+  schemaVersion: 1,
+  occurredAt: new Date(0).toISOString(),
+  correlationId: "corr-1",
+  causationId: null,
+  aggregateId: "agg-1",
+  aggregateType: "Example",
+  payload: { value: 1 },
+  attempts: 0,
+  availableAt: new Date(0).toISOString(),
+  publishedAt: null,
+  lastError: null,
+  leaseOwner: null,
+  leaseUntil: null,
+};
+
+describe("OutboxRelay", () => {
+  it("uses bounded exponential backoff", () => {
+    assert.equal(calculateExponentialBackoff(0), 1_000);
+    assert.equal(calculateExponentialBackoff(1), 2_000);
+    assert.equal(calculateExponentialBackoff(10), 1_024_000);
+    assert.equal(calculateExponentialBackoff(100), 1_024_000);
+  });
+
+  it("publishes claimed messages and marks them published", async () => {
+    const published: DomainEventEnvelope[] = [];
+    let publishedCount = 0;
+    let failedCount = 0;
+    const store: OutboxStore = {
+      claimBatch: async () => [message],
+      markPublished: async (eventId, workerId) => {
+        publishedCount += 1;
+        assert.equal(eventId, "evt-1");
+        assert.equal(workerId, "test-worker");
+      },
+      markFailed: async () => {
+        failedCount += 1;
+      },
+    };
+    const publisher: EventPublisher = {
+      publish: async (event) => {
+        published.push(event);
+      },
+    };
+
+    const count = await new OutboxRelay(store, publisher, { workerId: "test-worker" }).processBatch(
+      new Date(1_000),
+    );
+
+    assert.equal(count, 1);
+    assert.deepEqual(published, [message]);
+    assert.equal(publishedCount, 1);
+    assert.equal(failedCount, 0);
+  });
+
+  it("records a retry after publication failure", async () => {
+    let failedEventId = "";
+    let failedWorkerId = "";
+    let failedError: Error | undefined;
+    let failedAt: Date | undefined;
+    const store: OutboxStore = {
+      claimBatch: async () => [{ ...message, attempts: 1 }],
+      markPublished: async () => undefined,
+      markFailed: async (eventId, workerId, error, nextAttemptAt) => {
+        failedEventId = eventId;
+        failedWorkerId = workerId;
+        failedError = error;
+        failedAt = nextAttemptAt;
+      },
+    };
+    const publisher: EventPublisher = {
+      publish: async () => {
+        throw new Error("broker unavailable");
+      },
+    };
+
+    const count = await new OutboxRelay(store, publisher, { workerId: "test-worker" }).processBatch(
+      new Date(1_000),
+    );
+
+    assert.equal(count, 0);
+    assert.equal(failedEventId, "evt-1");
+    assert.equal(failedWorkerId, "test-worker");
+    assert.ok(failedError instanceof Error);
+    assert.deepEqual(failedAt, new Date(3_000));
+  });
+});

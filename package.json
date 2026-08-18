@@ -8,7 +8,7 @@
     "build": "tsc -p tsconfig.json",
     "dev": "npm run build && node dist/src/server.js",
     "start": "node dist/src/server.js",
-    "test": "npm run build && node --test dist/tests/*.test.js",
+    "test": "npm run build && node --test dist/tests",
     "prisma:generate": "prisma generate",
     "prisma:migrate:deploy": "prisma migrate deploy",
     "prisma:migrate:status": "prisma migrate status"
@@ -17,6 +17,7 @@
     "node": ">=20.0.0"
   },
   "devDependencies": {
+    "@types/node": "^22.0.0",
     "typescript": "^5.8.0",
     "prisma": "^6.13.0"
   },
