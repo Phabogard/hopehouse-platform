@@ -142,8 +142,6 @@ model AppSetting {
   createdBy User? @relation("AppSettingCreatedBy", fields: [createdByUserId], references: [id])
   updatedBy User? @relation("AppSettingUpdatedBy", fields: [updatedByUserId], references: [id])
 
-  // PostgreSQL contract enforces logical uniqueness with a NULLS NOT DISTINCT unique index.
-  // Prisma cannot express that index variant directly, so migrations must preserve it explicitly.
   @@index([namespace, key, scopeType, scopeId, status])
   @@index([namespace, key, status])
   @@index([scopeType, scopeId, status])
@@ -296,7 +294,7 @@ model PasswordResetRequest {
   status         PasswordResetStatus
   expiresAt      DateTime            @db.Timestamptz(3) @map("expires_at")
   completedAt    DateTime?           @db.Timestamptz(3) @map("completed_at")
-  createdAt      DateTime            @db.Timestamptz(3) @map("created_at")
+  createdAt      DateTime             @db.Timestamptz(3) @map("created_at")
   metadata       Json                @map("metadata_json")
 
   user User? @relation(fields: [userId], references: [id])
@@ -369,4 +367,47 @@ model AdminAccessLog {
   @@index([action, startedAt])
   @@index([sessionId])
   @@map("admin_access_logs")
+}
+
+model OutboxMessage {
+  id            String   @id
+  eventType     String   @map("event_type")
+  schemaVersion Int      @map("schema_version")
+  occurredAt    DateTime @db.Timestamptz(3) @map("occurred_at")
+  correlationId String   @map("correlation_id")
+  causationId   String?  @map("causation_id")
+  aggregateId   String   @map("aggregate_id")
+  aggregateType String   @map("aggregate_type")
+  payloadJson   Json     @map("payload_json")
+  attempts      Int      @default(0)
+  availableAt   DateTime @db.Timestamptz(3) @map("available_at")
+  publishedAt   DateTime? @db.Timestamptz(3) @map("published_at")
+  lastError     String?  @map("last_error")
+  leaseOwner    String?  @map("lease_owner")
+  leaseUntil    DateTime? @db.Timestamptz(3) @map("lease_until")
+  createdAt     DateTime @default(now()) @db.Timestamptz(3) @map("created_at")
+
+  @@index([availableAt, createdAt, id], map: "outbox_messages_pending_idx")
+  @@index([leaseUntil], map: "outbox_messages_lease_idx")
+  @@index([correlationId, occurredAt], map: "outbox_messages_correlation_idx")
+  @@index([aggregateType, aggregateId, occurredAt], map: "outbox_messages_aggregate_idx")
+  @@index([eventType, occurredAt], map: "outbox_messages_type_idx")
+  @@map("outbox_messages")
+}
+
+model AuditLog {
+  id          String   @id
+  actorUserId String?  @map("actor_user_id")
+  action      String
+  entityType  String   @map("entity_type")
+  entityId    String   @map("entity_id")
+  outcome     String
+  occurredAt  DateTime @db.Timestamptz(3) @map("occurred_at")
+  metadata    Json     @map("metadata_json")
+
+  @@index([actorUserId, occurredAt])
+  @@index([entityType, entityId, occurredAt])
+  @@index([action, occurredAt])
+  @@index([outcome, occurredAt])
+  @@map("audit_logs")
 }
