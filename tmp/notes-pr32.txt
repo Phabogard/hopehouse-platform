@@ -1,0 +1,3 @@
+PR #32 correction required before merge:
+- Restore the two AppSetting PostgreSQL NULLS NOT DISTINCT contract comments in prisma/schema.prisma.
+- Keep the existing outbox partial-index definitions migration-managed; do not replace them with non-partial database indexes.
