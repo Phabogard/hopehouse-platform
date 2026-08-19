@@ -202,11 +202,11 @@ model LoginSession {
   issuedAt            DateTime      @db.Timestamptz(3) @map("issued_at")
   expiresAt           DateTime      @db.Timestamptz(3) @map("expires_at")
   idleExpiresAt       DateTime?     @db.Timestamptz(3) @map("idle_expires_at")
-  lastSeenAt          DateTime?     @db.Timestamptz(3) @map("last_seen_at")
-  revokedAt           DateTime?     @db.Timestamptz(3) @map("revoked_at")
-  revokedByUserId     String?       @map("revoked_by_user_id")
-  revocationReason    String?       @map("revocation_reason")
-  metadata            Json          @map("metadata_json")
+  lastSeenAt           DateTime?     @db.Timestamptz(3) @map("last_seen_at")
+  revokedAt            DateTime?     @db.Timestamptz(3) @map("revoked_at")
+  revokedByUserId      String?       @map("revoked_by_user_id")
+  revocationReason     String?       @map("revocation_reason")
+  metadata             Json          @map("metadata_json")
 
   user                User                  @relation(fields: [userId], references: [id])
   deviceFingerprint   DeviceFingerprint?    @relation(fields: [deviceFingerprintId], references: [id])
@@ -275,7 +275,7 @@ model SecurityEvent {
   relatedEntityType String?               @map("related_entity_type")
   relatedEntityId   String?               @map("related_entity_id")
   occurredAt        DateTime              @db.Timestamptz(3) @map("occurred_at")
-  metadata          Json                  @map("metadata_json")
+  metadata          Json                   @map("metadata_json")
 
   user  User? @relation("SecurityEventUser", fields: [userId], references: [id])
   actor User? @relation("SecurityEventActor", fields: [actorUserId], references: [id])
@@ -296,7 +296,7 @@ model PasswordResetRequest {
   status         PasswordResetStatus
   expiresAt      DateTime            @db.Timestamptz(3) @map("expires_at")
   completedAt    DateTime?           @db.Timestamptz(3) @map("completed_at")
-  createdAt      DateTime            @db.Timestamptz(3) @map("created_at")
+  createdAt      DateTime             @db.Timestamptz(3) @map("created_at")
   metadata       Json                @map("metadata_json")
 
   user User? @relation(fields: [userId], references: [id])
@@ -369,4 +369,47 @@ model AdminAccessLog {
   @@index([action, startedAt])
   @@index([sessionId])
   @@map("admin_access_logs")
+}
+
+model OutboxMessage {
+  id            String   @id
+  eventType     String   @map("event_type")
+  schemaVersion Int      @map("schema_version")
+  occurredAt    DateTime @db.Timestamptz(3) @map("occurred_at")
+  correlationId String   @map("correlation_id")
+  causationId   String?  @map("causation_id")
+  aggregateId   String   @map("aggregate_id")
+  aggregateType String   @map("aggregate_type")
+  payloadJson   Json     @map("payload_json")
+  attempts      Int      @default(0)
+  availableAt   DateTime @db.Timestamptz(3) @map("available_at")
+  publishedAt   DateTime? @map("published_at") @db.Timestamptz(3)
+  lastError     String?  @map("last_error")
+  leaseOwner    String?  @map("lease_owner")
+  leaseUntil    DateTime? @map("lease_until") @db.Timestamptz(3)
+  createdAt     DateTime @default(now()) @db.Timestamptz(3) @map("created_at")
+
+  // PostgreSQL manages these two partial indexes because Prisma 6.13 cannot represent WHERE predicates.
+  // Keep the exact definitions in the SQL migration; do not replace them with ordinary Prisma indexes.
+  @@index([correlationId, occurredAt], map: "outbox_messages_correlation_idx")
+  @@index([aggregateType, aggregateId, occurredAt], map: "outbox_messages_aggregate_idx")
+  @@index([eventType, occurredAt], map: "outbox_messages_type_idx")
+  @@map("outbox_messages")
+}
+
+model AuditLog {
+  id          String   @id
+  actorUserId String?  @map("actor_user_id")
+  action      String
+  entityType  String   @map("entity_type")
+  entityId    String   @map("entity_id")
+  outcome     String
+  occurredAt  DateTime @db.Timestamptz(3) @map("occurred_at")
+  metadata    Json     @map("metadata_json")
+
+  @@index([actorUserId, occurredAt])
+  @@index([entityType, entityId, occurredAt])
+  @@index([action, occurredAt])
+  @@index([outcome, occurredAt])
+  @@map("audit_logs")
 }

@@ -2,9 +2,9 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { AuditLogService } from '../src/modules/audit/audit-log.js';
 
-test('audit entries and metadata are immutable after recording', () => {
+test('audit entries and metadata are immutable after recording', async () => {
   const audit = new AuditLogService();
-  const entry = audit.record({
+  const entry = await audit.record({
     actorUserId: 'u1',
     action: 'beneficiary.create',
     entityType: 'beneficiary',
@@ -23,9 +23,9 @@ test('audit entries and metadata are immutable after recording', () => {
   assert.equal(entry.metadata.reference, 'BEN-001');
 });
 
-test('audit list cannot be used to mutate the audit log collection', () => {
+test('audit list cannot be used to mutate the audit log collection', async () => {
   const audit = new AuditLogService();
-  audit.record({
+  await audit.record({
     actorUserId: 'u1',
     action: 'payment.create',
     entityType: 'payment',
@@ -33,9 +33,9 @@ test('audit list cannot be used to mutate the audit log collection', () => {
     outcome: 'success',
   });
 
-  const entries = audit.list();
+  const entries = await audit.list();
   assert.throws(() => {
     (entries as unknown[]).push({});
   });
-  assert.equal(audit.list().length, 1);
+  assert.equal((await audit.list()).length, 1);
 });
