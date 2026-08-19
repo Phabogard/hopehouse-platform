@@ -12,7 +12,6 @@ import { createUser } from './modules/users/users.js';
 import { AuthRuntimeContext, type AuthenticatedActor, type AuthenticatedLoginResult, type AuthRuntimeOptions } from './modules/auth-security/index.js';
 import { OpenAiResponsesClient, resolveLiveAiPolicy, type AiChatProvider } from './modules/ai-assistant/openai.js';
 
-const audit = new AuditLogService();
 const orderEngine = new OrderEngine();
 const orders = new Map<string, Order>();
 
@@ -40,6 +39,7 @@ export interface HopeHouseServerOptions {
   readonly auth?: AuthRuntimeOptions;
   readonly authRuntime?: AuthRuntime | null;
   readonly aiClient?: AiChatProvider;
+  readonly audit?: AuditLogService;
 }
 
 function sendJson(response: ServerResponse, statusCode: number, body: unknown): void {
@@ -138,25 +138,11 @@ function isProtectedRoute(method: string | undefined, pathname: string): boolean
 function sensitiveAuditContext(method: string | undefined, pathname: string, actor: Actor | null): SensitiveAuditContext | null {
   if (actor === null) return null;
 
-  if (method === 'POST' && pathname === '/beneficiaries') {
-    return { actorUserId: actor.id, action: 'beneficiary.create', entityType: 'beneficiary' };
-  }
-
-  if (method === 'POST' && pathname === '/payments') {
-    return { actorUserId: actor.id, action: 'payment.create', entityType: 'payment' };
-  }
-
-  if (method === 'POST' && pathname === '/orders') {
-    return { actorUserId: actor.id, action: 'order.create', entityType: 'order' };
-  }
-
-  if (method === 'POST' && pathname.match(/^\/orders\/[^/]+\/transitions$/) !== null) {
-    return { actorUserId: actor.id, action: 'order.transition', entityType: 'order' };
-  }
-
-  if (method === 'POST' && pathname === '/ai/chat') {
-    return { actorUserId: actor.id, action: 'ai.chat', entityType: 'ai_session' };
-  }
+  if (method === 'POST' && pathname === '/beneficiaries') return { actorUserId: actor.id, action: 'beneficiary.create', entityType: 'beneficiary' };
+  if (method === 'POST' && pathname === '/payments') return { actorUserId: actor.id, action: 'payment.create', entityType: 'payment' };
+  if (method === 'POST' && pathname === '/orders') return { actorUserId: actor.id, action: 'order.create', entityType: 'order' };
+  if (method === 'POST' && pathname.match(/^\/orders\/[^/]+\/transitions$/) !== null) return { actorUserId: actor.id, action: 'order.transition', entityType: 'order' };
+  if (method === 'POST' && pathname === '/ai/chat') return { actorUserId: actor.id, action: 'ai.chat', entityType: 'ai_session' };
 
   return null;
 }
@@ -198,6 +184,7 @@ export function createHopeHouseServer(options: HopeHouseServerOptions = {}) {
     ? options.authRuntime
     : options.auth === undefined && process.env.HOPEHOUSE_JWT_SECRET === undefined ? null : new AuthRuntimeContext(options.auth);
   const aiClient = options.aiClient ?? new OpenAiResponsesClient();
+  const audit = options.audit ?? new AuditLogService();
 
   return createServer(async (request: IncomingMessage, response: ServerResponse) => {
     const url = new URL(request.url ?? '/', 'http://localhost');
@@ -232,7 +219,7 @@ export function createHopeHouseServer(options: HopeHouseServerOptions = {}) {
         const currentActor = requireAuthenticatedActor(actor);
         const body = await readJsonBody(request);
         const result = await aiClient.chat(currentActor, stringField(body, 'message'), resolveLiveAiPolicy(currentActor));
-        audit.record({ actorUserId: currentActor.id, action: 'ai.chat', entityType: 'ai_session', entityId: 'conversation', outcome: 'success' });
+        await audit.record({ actorUserId: currentActor.id, action: 'ai.chat', entityType: 'ai_session', entityId: 'conversation', outcome: 'success' });
         sendJson(response, 200, { data: result });
         return;
       }
@@ -251,6 +238,7 @@ export function createHopeHouseServer(options: HopeHouseServerOptions = {}) {
           metadata: optionalObjectField(body, 'metadata') ?? undefined,
         });
         orders.set(order.id, order);
+        await audit.record({ actorUserId: currentActor.id, action: 'order.create', entityType: 'order', entityId: order.id, outcome: 'success' });
         sendJson(response, 201, { data: order });
         return;
       }
@@ -268,6 +256,7 @@ export function createHopeHouseServer(options: HopeHouseServerOptions = {}) {
           metadata: optionalObjectField(body, 'metadata') ?? undefined,
         });
         orders.set(advancedOrder.id, advancedOrder);
+        await audit.record({ actorUserId: currentActor.id, action: 'order.transition', entityType: 'order', entityId: advancedOrder.id, outcome: 'success', metadata: { toStep: advancedOrder.currentStep } });
         sendJson(response, 200, { data: advancedOrder });
         return;
       }
@@ -291,7 +280,7 @@ export function createHopeHouseServer(options: HopeHouseServerOptions = {}) {
         authorize(currentActor, 'beneficiaries:manage');
         const body = await readJsonBody(request);
         const beneficiary = createBeneficiary({ reference: stringField(body, 'reference'), displayName: stringField(body, 'displayName') });
-        audit.record({ actorUserId: currentActor.id, action: 'beneficiary.create', entityType: 'beneficiary', entityId: beneficiary.id, outcome: 'success' });
+        await audit.record({ actorUserId: currentActor.id, action: 'beneficiary.create', entityType: 'beneficiary', entityId: beneficiary.id, outcome: 'success' });
         sendJson(response, 201, { data: beneficiary });
         return;
       }
@@ -327,7 +316,7 @@ export function createHopeHouseServer(options: HopeHouseServerOptions = {}) {
           currency: stringField(body, 'currency'),
           paymentMethod: optionalStringField(body, 'paymentMethod'),
         });
-        audit.record({ actorUserId: currentActor.id, action: 'payment.create', entityType: 'payment', entityId: payment.id, outcome: 'success' });
+        await audit.record({ actorUserId: currentActor.id, action: 'payment.create', entityType: 'payment', entityId: payment.id, outcome: 'success' });
         sendJson(response, 201, { data: payment });
         return;
       }
@@ -342,8 +331,8 @@ export function createHopeHouseServer(options: HopeHouseServerOptions = {}) {
       if (request.method === 'GET' && url.pathname === '/audit-logs') {
         const currentActor = requireAuthenticatedActor(actor);
         authorize(currentActor, 'audit:read');
-        audit.record({ actorUserId: currentActor.id, action: 'audit.list', entityType: 'audit_log', entityId: 'collection', outcome: 'success' });
-        sendJson(response, 200, { data: audit.list() });
+        await audit.record({ actorUserId: currentActor.id, action: 'audit.list', entityType: 'audit_log', entityId: 'collection', outcome: 'success' });
+        sendJson(response, 200, { data: await audit.list() });
         return;
       }
 
@@ -353,7 +342,7 @@ export function createHopeHouseServer(options: HopeHouseServerOptions = {}) {
       const message = error instanceof Error ? error.message : 'Erreur interne';
 
       if (auditContext !== null) {
-        audit.record({
+        await audit.record({
           actorUserId: auditContext.actorUserId,
           action: auditContext.action,
           entityType: auditContext.entityType,
