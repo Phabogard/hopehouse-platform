@@ -7,6 +7,7 @@ import { normalizeAuthSecurityPolicy, resolveAuthSecurityPolicy } from '../../mo
 import type { AuthSecurityPolicy, Clock, DeviceContext, LoginSession, PasswordVerifier, SecretGenerator } from '../../modules/auth-security/types.js';
 import { ConfigurationService } from '../../modules/configuration/index.js';
 import type { Role } from '../../modules/rbac/permissions.js';
+import type { PrismaAuditLogClient } from './audit-log-repository.js';
 import { PrismaAppSettingRepository, type PrismaAppSettingClient } from './app-setting-repository.js';
 import { PrismaAuthCredentialRepository, type PrismaAuthCredentialClient } from './auth-credential-repository.js';
 import { PrismaAuthUserRepository, type PrismaAuthUserClient } from './auth-user-repository.js';
@@ -33,7 +34,7 @@ type PrismaAuthRuntimeUserDelegate = {
 type PrismaAuthCredentialTransaction = Parameters<PrismaAuthCredentialClient['$transaction']>[0] extends (transaction: infer TTransaction) => Promise<unknown> ? TTransaction : never;
 type PrismaRefreshTokenTransaction = Parameters<PrismaRefreshTokenClient['$transaction']>[0] extends (transaction: infer TTransaction) => Promise<unknown> ? TTransaction : never;
 
-export interface PrismaAuthRuntimeClient extends PrismaClientLifecycle, PrismaAppSettingClient, PrismaAuthUserClient, Omit<PrismaAuthCredentialClient, '$transaction'>, PrismaDeviceFingerprintClient, PrismaLoginAttemptClient, PrismaPasswordResetRequestClient, Omit<PrismaRefreshTokenClient, '$transaction'>, PrismaSecurityEventClient, PrismaSessionClient, PrismaTwoFactorChallengeClient {
+export interface PrismaAuthRuntimeClient extends PrismaClientLifecycle, PrismaAppSettingClient, PrismaAuditLogClient, PrismaAuthUserClient, Omit<PrismaAuthCredentialClient, '$transaction'>, PrismaDeviceFingerprintClient, PrismaLoginAttemptClient, PrismaPasswordResetRequestClient, Omit<PrismaRefreshTokenClient, '$transaction'>, PrismaSecurityEventClient, PrismaSessionClient, PrismaTwoFactorChallengeClient {
   readonly user: PrismaAuthUserClient['user'] & PrismaAuthRuntimeUserDelegate;
   $transaction<T>(operation: (transaction: PrismaAuthCredentialTransaction) => Promise<T>): Promise<T>;
   $transaction<T>(operation: (transaction: PrismaRefreshTokenTransaction) => Promise<T>): Promise<T>;
@@ -63,7 +64,6 @@ function toSessionResponse(session: LoginSession): AuthenticatedActorSession {
 class SystemClock implements Clock {
   now(): Date { return new Date(); }
 }
-
 
 function hasAppSettingClient(client: PrismaAuthRuntimeClient): boolean {
   return typeof (client as { readonly appSetting?: unknown }).appSetting === 'object' && (client as { readonly appSetting?: unknown }).appSetting !== null;
