@@ -142,6 +142,8 @@ model AppSetting {
   createdBy User? @relation("AppSettingCreatedBy", fields: [createdByUserId], references: [id])
   updatedBy User? @relation("AppSettingUpdatedBy", fields: [updatedByUserId], references: [id])
 
+  // PostgreSQL contract enforces logical uniqueness with a NULLS NOT DISTINCT unique index.
+  // Prisma cannot express that index variant directly, so migrations must preserve it explicitly.
   @@index([namespace, key, scopeType, scopeId, status])
   @@index([namespace, key, status])
   @@index([scopeType, scopeId, status])
@@ -200,11 +202,11 @@ model LoginSession {
   issuedAt            DateTime      @db.Timestamptz(3) @map("issued_at")
   expiresAt           DateTime      @db.Timestamptz(3) @map("expires_at")
   idleExpiresAt       DateTime?     @db.Timestamptz(3) @map("idle_expires_at")
-  lastSeenAt          DateTime?     @db.Timestamptz(3) @map("last_seen_at")
-  revokedAt           DateTime?     @db.Timestamptz(3) @map("revoked_at")
-  revokedByUserId     String?       @map("revoked_by_user_id")
-  revocationReason    String?       @map("revocation_reason")
-  metadata            Json          @map("metadata_json")
+  lastSeenAt           DateTime?     @db.Timestamptz(3) @map("last_seen_at")
+  revokedAt            DateTime?     @db.Timestamptz(3) @map("revoked_at")
+  revokedByUserId      String?       @map("revoked_by_user_id")
+  revocationReason     String?       @map("revocation_reason")
+  metadata             Json          @map("metadata_json")
 
   user                User                  @relation(fields: [userId], references: [id])
   deviceFingerprint   DeviceFingerprint?    @relation(fields: [deviceFingerprintId], references: [id])
@@ -273,7 +275,7 @@ model SecurityEvent {
   relatedEntityType String?               @map("related_entity_type")
   relatedEntityId   String?               @map("related_entity_id")
   occurredAt        DateTime              @db.Timestamptz(3) @map("occurred_at")
-  metadata          Json                  @map("metadata_json")
+  metadata          Json                   @map("metadata_json")
 
   user  User? @relation("SecurityEventUser", fields: [userId], references: [id])
   actor User? @relation("SecurityEventActor", fields: [actorUserId], references: [id])
@@ -381,14 +383,14 @@ model OutboxMessage {
   payloadJson   Json     @map("payload_json")
   attempts      Int      @default(0)
   availableAt   DateTime @db.Timestamptz(3) @map("available_at")
-  publishedAt   DateTime? @db.Timestamptz(3) @map("published_at")
+  publishedAt   DateTime? @map("published_at") @db.Timestamptz(3)
   lastError     String?  @map("last_error")
   leaseOwner    String?  @map("lease_owner")
-  leaseUntil    DateTime? @db.Timestamptz(3) @map("lease_until")
+  leaseUntil    DateTime? @map("lease_until") @db.Timestamptz(3)
   createdAt     DateTime @default(now()) @db.Timestamptz(3) @map("created_at")
 
-  @@index([availableAt, createdAt, id], map: "outbox_messages_pending_idx")
-  @@index([leaseUntil], map: "outbox_messages_lease_idx")
+  // PostgreSQL manages these two partial indexes because Prisma 6.13 cannot represent WHERE predicates.
+  // Keep the exact definitions in the SQL migration; do not replace them with ordinary Prisma indexes.
   @@index([correlationId, occurredAt], map: "outbox_messages_correlation_idx")
   @@index([aggregateType, aggregateId, occurredAt], map: "outbox_messages_aggregate_idx")
   @@index([eventType, occurredAt], map: "outbox_messages_type_idx")
