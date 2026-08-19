@@ -34,7 +34,7 @@ test("rejects a poll with fewer than two options", () => {
       multipleAnswers: false,
       anonymous: false,
     },
-  }), /at least two options/);
+  }), /at least two distinct options/);
 });
 
 test("rejects invalid coordinates", () => {
