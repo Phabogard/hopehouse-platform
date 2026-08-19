@@ -18,15 +18,12 @@ The relay is responsible for claiming pending records, publishing them, and mark
 
 ## Important Prisma guardrail
 
-The Outbox migration is deliberately introduced before adding a generated Prisma model because the current Prisma schema is an authentication/security contract and is not yet the final cross-domain schema. Before this migration is treated as production-ready, the final Prisma schema must represent the Outbox table or explicitly preserve it as an intentionally unmanaged table. A future Prisma migration must never silently drop `outbox_messages`.
+The Prisma schema now mirrors the `outbox_messages` table columns and the non-partial indexes that Prisma can represent without semantic loss. The PostgreSQL migration remains the source of truth for `outbox_messages_pending_idx` and `outbox_messages_lease_idx` because both are partial indexes with `WHERE published_at IS NULL`, which Prisma cannot represent as ordinary `@@index` definitions. A future Prisma migration must never silently drop or widen those partial indexes.
 
 ## Not implemented yet
 
-- relay worker;
-- row locking/claim implementation;
-- retry backoff policy;
+- production relay worker;
 - dead-letter policy;
-- transactional domain repository integration;
-- Prisma generated model.
+- transactional domain repository integration.
 
 These are intentionally deferred until the event transport and domain boundaries are reviewed.

@@ -12,6 +12,8 @@ function enabledSystemAdminPolicy() {
 }
 
 test('OpenAI Responses provider sends only server-side credentials and returns output text', async () => {
+  const previousBaseUrl = process.env.OPENAI_BASE_URL;
+  delete process.env.OPENAI_BASE_URL;
   let requestUrl = '';
   let requestBody = '';
   const client = new OpenAiResponsesClient({
@@ -26,13 +28,18 @@ test('OpenAI Responses provider sends only server-side credentials and returns o
     },
   });
 
-  const result = await client.chat(systemAdmin, 'Bonjour', enabledSystemAdminPolicy());
+  try {
+    const result = await client.chat(systemAdmin, 'Bonjour', enabledSystemAdminPolicy());
 
-  assert.equal(result.text, 'Bonjour HopeHouse.');
-  assert.equal(result.model, 'gpt-5.6');
-  assert.equal(requestUrl, 'https://api.openai.com/v1/responses');
-  assert.equal(requestBody.includes('test-secret'), false);
-  assert.equal(requestBody.includes('Bonjour'), true);
+    assert.equal(result.text, 'Bonjour HopeHouse.');
+    assert.equal(result.model, 'gpt-5.6');
+    assert.equal(requestUrl, 'https://api.openai.com/v1/responses');
+    assert.equal(requestBody.includes('test-secret'), false);
+    assert.equal(requestBody.includes('Bonjour'), true);
+  } finally {
+    if (previousBaseUrl === undefined) delete process.env.OPENAI_BASE_URL;
+    else process.env.OPENAI_BASE_URL = previousBaseUrl;
+  }
 });
 
 test('live AI policy remains disabled by default', () => {
