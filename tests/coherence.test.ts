@@ -338,3 +338,94 @@ test('database contract documents Prisma-aligned auth security indexes', () => {
     assert.equal(schema.includes(indexName), true, indexName);
   }
 });
+
+
+test('database contract preserves Outbox PostgreSQL partial indexes outside Prisma management', () => {
+  const migration = readProjectFile('prisma/migrations/20260817100000_shared_kernel_outbox/migration.sql');
+  const prisma = readProjectFile('prisma/schema.prisma');
+
+  assert.match(migration, /CREATE TABLE "outbox_messages"[\s\S]*CONSTRAINT "outbox_messages_pkey" PRIMARY KEY \("id"\)/);
+  assert.match(migration, /CREATE INDEX "outbox_messages_pending_idx"\s+ON "outbox_messages" \("available_at", "created_at", "id"\)\s+WHERE "published_at" IS NULL;/);
+  assert.match(migration, /CREATE INDEX "outbox_messages_lease_idx"\s+ON "outbox_messages" \("lease_until"\)\s+WHERE "published_at" IS NULL;/);
+
+  assert.equal(prisma.includes('model OutboxMessage'), true);
+  assert.equal(prisma.includes('outbox_messages_pending_idx'), true);
+  assert.equal(prisma.includes('outbox_messages_lease_idx'), true);
+  assert.equal(prisma.includes('Prisma 6.13 cannot represent WHERE predicates'), true);
+  assert.equal(prisma.includes('@@index([availableAt, createdAt, id]'), false);
+  assert.equal(prisma.includes('@@index([leaseUntil]'), false);
+  for (const representableIndex of [
+    '@@index([correlationId, occurredAt], map: "outbox_messages_correlation_idx")',
+    '@@index([aggregateType, aggregateId, occurredAt], map: "outbox_messages_aggregate_idx")',
+    '@@index([eventType, occurredAt], map: "outbox_messages_type_idx")',
+  ]) {
+    assert.equal(prisma.includes(representableIndex), true, representableIndex);
+  }
+});
+
+test('database contract aligns Outbox table columns between Prisma and SQL migration', () => {
+  const migration = readProjectFile('prisma/migrations/20260817100000_shared_kernel_outbox/migration.sql');
+  const prisma = readProjectFile('prisma/schema.prisma');
+
+  for (const column of [
+    '"id" TEXT NOT NULL',
+    '"event_type" TEXT NOT NULL',
+    '"schema_version" INTEGER NOT NULL',
+    '"occurred_at" TIMESTAMPTZ(3) NOT NULL',
+    '"correlation_id" TEXT NOT NULL',
+    '"causation_id" TEXT',
+    '"aggregate_id" TEXT NOT NULL',
+    '"aggregate_type" TEXT NOT NULL',
+    '"payload_json" JSONB NOT NULL',
+    '"attempts" INTEGER NOT NULL DEFAULT 0',
+    '"available_at" TIMESTAMPTZ(3) NOT NULL',
+    '"published_at" TIMESTAMPTZ(3)',
+    '"last_error" TEXT',
+    '"lease_owner" TEXT',
+    '"lease_until" TIMESTAMPTZ(3)',
+    '"created_at" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP',
+  ]) {
+    assert.equal(migration.includes(column), true, column);
+  }
+
+  for (const field of [
+    'id            String   @id',
+    'eventType     String   @map("event_type")',
+    'schemaVersion Int      @map("schema_version")',
+    'occurredAt    DateTime @db.Timestamptz(3) @map("occurred_at")',
+    'correlationId String   @map("correlation_id")',
+    'causationId   String?  @map("causation_id")',
+    'aggregateId   String   @map("aggregate_id")',
+    'aggregateType String   @map("aggregate_type")',
+    'payloadJson   Json     @map("payload_json")',
+    'attempts      Int      @default(0)',
+    'availableAt   DateTime @db.Timestamptz(3) @map("available_at")',
+    'publishedAt   DateTime? @map("published_at") @db.Timestamptz(3)',
+    'lastError     String?  @map("last_error")',
+    'leaseOwner    String?  @map("lease_owner")',
+    'leaseUntil    DateTime? @map("lease_until") @db.Timestamptz(3)',
+    'createdAt     DateTime @default(now()) @db.Timestamptz(3) @map("created_at")',
+  ]) {
+    assert.equal(prisma.includes(field), true, field);
+  }
+});
+
+test('database contract aligns durable Audit persistence and Prisma composition', () => {
+  const migration = readProjectFile('prisma/migrations/20260818120000_audit_logs/migration.sql');
+  const prisma = readProjectFile('prisma/schema.prisma');
+  const repository = readProjectFile('src/infrastructure/prisma/audit-log-repository.ts');
+  const composition = readProjectFile('src/infrastructure/prisma/server-composition.ts');
+  const service = readProjectFile('src/modules/audit/audit-log.ts');
+
+  assert.match(migration, /CREATE TABLE "audit_logs"[\s\S]*CONSTRAINT "audit_logs_pkey" PRIMARY KEY \("id"\)/);
+  for (const indexName of ['audit_logs_actor_occurred_idx', 'audit_logs_entity_occurred_idx', 'audit_logs_action_occurred_idx', 'audit_logs_outcome_occurred_idx']) {
+    assert.equal(migration.includes(indexName), true, indexName);
+  }
+  assert.equal(prisma.includes('model AuditLog'), true);
+  assert.equal(prisma.includes('@@map("audit_logs")'), true);
+  assert.equal(repository.includes('export class PrismaAuditLogRepository implements AuditLogRepository'), true);
+  assert.equal(repository.includes('this.client.auditLog.create'), true);
+  assert.equal(repository.includes('this.client.auditLog.findMany'), true);
+  assert.equal(composition.includes('new AuditLogService(new PrismaAuditLogRepository(client))'), true);
+  assert.equal(service.includes('new InMemoryAuditLogRepository()'), true);
+});

@@ -389,8 +389,10 @@ model OutboxMessage {
   leaseUntil    DateTime? @map("lease_until") @db.Timestamptz(3)
   createdAt     DateTime @default(now()) @db.Timestamptz(3) @map("created_at")
 
-  // PostgreSQL manages these two partial indexes because Prisma 6.13 cannot represent WHERE predicates.
-  // Keep the exact definitions in the SQL migration; do not replace them with ordinary Prisma indexes.
+  // PostgreSQL manages outbox_messages_pending_idx and outbox_messages_lease_idx as partial indexes
+  // because Prisma 6.13 cannot represent WHERE predicates. Keep the exact SQL definitions
+  // in prisma/migrations/20260817100000_shared_kernel_outbox/migration.sql; do not
+  // replace them with ordinary Prisma indexes because that would widen the indexed rows.
   @@index([correlationId, occurredAt], map: "outbox_messages_correlation_idx")
   @@index([aggregateType, aggregateId, occurredAt], map: "outbox_messages_aggregate_idx")
   @@index([eventType, occurredAt], map: "outbox_messages_type_idx")
