@@ -16,6 +16,9 @@ test('postgres idempotency store maps persisted records', async () => {
         },
       ];
     },
+    async $executeRaw() {
+      return 1;
+    },
   };
 
   const store = new PostgresIdempotencyStore(client);
@@ -34,9 +37,12 @@ test('postgres idempotency store maps persisted records', async () => {
 test('postgres idempotency store persists records with an atomic duplicate-safe insert', async () => {
   const calls: Array<{ readonly sql: string; readonly values: readonly unknown[] }> = [];
   const client: PrismaIdempotencyClient = {
-    async $queryRaw(strings: TemplateStringsArray, ...values: readonly unknown[]) {
-      calls.push({ sql: Array.from(strings).join('?'), values });
+    async $queryRaw() {
       return [];
+    },
+    async $executeRaw(strings: TemplateStringsArray, ...values: readonly unknown[]) {
+      calls.push({ sql: Array.from(strings).join('?'), values });
+      return 1;
     },
   };
 
@@ -62,8 +68,11 @@ test('postgres idempotency store rejects invalid creation timestamps before writ
   let queryCount = 0;
   const client: PrismaIdempotencyClient = {
     async $queryRaw() {
-      queryCount += 1;
       return [];
+    },
+    async $executeRaw() {
+      queryCount += 1;
+      return 0;
     },
   };
 
