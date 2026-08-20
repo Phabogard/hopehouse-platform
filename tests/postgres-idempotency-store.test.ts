@@ -5,7 +5,7 @@ import { PostgresIdempotencyStore, type PrismaIdempotencyClient } from '../src/i
 test('postgres idempotency store maps persisted records', async () => {
   const calls: Array<{ readonly sql: string; readonly values: readonly unknown[] }> = [];
   const client: PrismaIdempotencyClient = {
-    async $queryRaw(strings: TemplateStringsArray, ...values: readonly unknown[]) {
+    async $queryRaw<T = unknown>(strings: TemplateStringsArray, ...values: readonly unknown[]): Promise<T> {
       calls.push({ sql: Array.from(strings).join('?'), values });
       return [
         {
@@ -14,7 +14,7 @@ test('postgres idempotency store maps persisted records', async () => {
           result_reference: 'payment-1',
           created_at: new Date('2026-08-20T10:00:00.000Z'),
         },
-      ];
+      ] as T;
     },
     async $executeRaw() {
       return 1;
@@ -37,8 +37,8 @@ test('postgres idempotency store maps persisted records', async () => {
 test('postgres idempotency store persists records with an atomic duplicate-safe insert', async () => {
   const calls: Array<{ readonly sql: string; readonly values: readonly unknown[] }> = [];
   const client: PrismaIdempotencyClient = {
-    async $queryRaw() {
-      return [];
+    async $queryRaw<T = unknown>(): Promise<T> {
+      return [] as T;
     },
     async $executeRaw(strings: TemplateStringsArray, ...values: readonly unknown[]) {
       calls.push({ sql: Array.from(strings).join('?'), values });
@@ -67,8 +67,8 @@ test('postgres idempotency store persists records with an atomic duplicate-safe 
 test('postgres idempotency store rejects invalid creation timestamps before writing', async () => {
   let queryCount = 0;
   const client: PrismaIdempotencyClient = {
-    async $queryRaw() {
-      return [];
+    async $queryRaw<T = unknown>(): Promise<T> {
+      return [] as T;
     },
     async $executeRaw() {
       queryCount += 1;
