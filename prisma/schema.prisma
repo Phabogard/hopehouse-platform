@@ -415,3 +415,120 @@ model AuditLog {
   @@index([outcome, occurredAt])
   @@map("audit_logs")
 }
+
+// ==========================================
+// MODULE WALLETS (OPTION B - FK COMPOSITES)
+// ==========================================
+
+enum WalletStatus {
+  ACTIVE
+  FROZEN
+  CLOSED
+}
+
+enum WalletTransactionType {
+  CREDIT
+  DEBIT
+  RESERVATION_HOLD
+  RESERVATION_RELEASE
+  RESERVATION_CAPTURE
+  ROLLBACK
+}
+
+enum WalletTransactionStatus {
+  SETTLED
+  FAILED
+}
+
+enum WalletReservationStatus {
+  ACTIVE
+  RELEASED
+  CAPTURED
+  ROLLED_BACK
+}
+
+model Wallet {
+  id        String       @id @map("id")
+  ownerType String       @map("owner_type")
+  ownerId   String       @map("owner_id")
+  status    WalletStatus @default(ACTIVE) @map("status")
+  createdAt DateTime     @default(now()) @db.Timestamptz(3) @map("created_at")
+  updatedAt DateTime     @updatedAt @db.Timestamptz(3) @map("updated_at")
+
+  balances     WalletBalance[]
+  transactions WalletTransaction[]
+  reservations WalletReservation[]
+
+  @@unique([ownerType, ownerId], name: "wallets_owner_type_owner_id_unique")
+  @@index([ownerType, ownerId], name: "wallets_owner_lookup_idx")
+  @@map("wallets")
+}
+
+model WalletBalance {
+  walletId       String   @map("wallet_id")
+  currency       String   @map("currency")
+  availableCents BigInt   @default(0) @map("available_cents")
+  reservedCents  BigInt   @default(0) @map("reserved_cents")
+  updatedAt      DateTime @updatedAt @db.Timestamptz(3) @map("updated_at")
+
+  wallet Wallet @relation(fields: [walletId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@id([walletId, currency])
+  @@index([walletId], name: "wallet_balances_wallet_id_idx")
+  @@map("wallet_balances")
+}
+
+model WalletTransaction {
+  id                      String                  @id @map("id")
+  walletId                String                  @map("wallet_id")
+  currency                String                  @map("currency")
+  amountCents             BigInt                  @map("amount_cents")
+  type                    WalletTransactionType   @map("type")
+  status                  WalletTransactionStatus @map("status")
+  actorId                 String                  @map("actor_id")
+  transactionKey          String?                 @map("transaction_key")
+  relatedEntityType       String?                 @map("related_entity_type")
+  relatedEntityId         String?                 @map("related_entity_id")
+  reversalOfTransactionId String?                 @map("reversal_of_transaction_id")
+  occurredAt              DateTime                @default(now()) @db.Timestamptz(3) @map("occurred_at")
+  metadataJson            Json                    @map("metadata_json")
+
+  wallet Wallet @relation(fields: [walletId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  // Relation auto-référentielle COMPOSITE pour rollback cross-wallet
+  reversalOf WalletTransaction?  @relation("TransactionReversals", fields: [walletId, reversalOfTransactionId], references: [walletId, id], onDelete: Restrict, onUpdate: Restrict)
+  reversals  WalletTransaction[] @relation("TransactionReversals")
+
+  // Relations composites Option B pour les réservations
+  createdReservations WalletReservation[] @relation("ReservationCreatedByTx")
+  closedReservations  WalletReservation[] @relation("ReservationClosedByTx")
+
+  // Contrainte unique composite obligatoire pour permettre les FK composites cibles
+  @@unique([walletId, id], name: "wallet_transactions_wallet_id_id_unique")
+  @@index([walletId, occurredAt(sort: Desc)], name: "wallet_transactions_occurred_at_idx")
+  @@map("wallet_transactions")
+}
+
+model WalletReservation {
+  id                     String                  @id @map("id")
+  walletId               String                  @map("wallet_id")
+  currency               String                  @map("currency")
+  amountCents            BigInt                  @map("amount_cents")
+  status                 WalletReservationStatus @default(ACTIVE) @map("status")
+  relatedEntityType      String?                 @map("related_entity_type")
+  relatedEntityId        String?                 @map("related_entity_id")
+  createdByTransactionId String                  @map("created_by_transaction_id")
+  closedByTransactionId  String?                 @map("closed_by_transaction_id")
+  createdAt              DateTime                @default(now()) @db.Timestamptz(3) @map("created_at")
+  updatedAt              DateTime                @updatedAt @db.Timestamptz(3) @map("updated_at")
+  metadataJson           Json                    @map("metadata_json")
+
+  wallet Wallet @relation(fields: [walletId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  // Option B : FK composites structurelles PostgreSQL
+  createdByTransaction WalletTransaction  @relation("ReservationCreatedByTx", fields: [walletId, createdByTransactionId], references: [walletId, id], onDelete: Restrict, onUpdate: Restrict)
+  closedByTransaction    WalletTransaction? @relation("ReservationClosedByTx", fields: [walletId, closedByTransactionId], references: [walletId, id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([walletId, status], name: "wallet_reservations_wallet_status_idx")
+  @@map("wallet_reservations")
+}
