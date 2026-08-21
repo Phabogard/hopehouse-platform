@@ -1,0 +1,1 @@
+Option B wallet persistence migration. See migration.sql for the complete PostgreSQL contract.
