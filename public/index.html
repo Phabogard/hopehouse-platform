@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HOPEHOUSE — Plateforme ERP</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div class="app-container" id="app-root">
+    <header class="app-header" id="app-header">
+      <div class="brand">
+        <span class="brand-badge" id="brand-badge">HOPEHOUSE</span>
+        <h1 class="brand-title" id="brand-title">Fondation Frontend ↔ Backend</h1>
+      </div>
+      <div class="system-status" id="system-status-indicator">
+        <span class="status-dot connecting" id="status-dot"></span>
+        <span class="status-text" id="status-text">Connexion au backend...</span>
+      </div>
+    </header>
+
+    <main class="main-content" id="main-content">
+      <section class="card status-card" id="status-card">
+        <div class="card-header">
+          <h2 class="card-title" id="status-title">État de la Liaison HTTP / JSON</h2>
+          <button class="btn btn-secondary" id="refresh-btn" type="button">Vérifier à nouveau</button>
+        </div>
+
+        <div class="metrics-grid" id="metrics-grid">
+          <div class="metric-item" id="metric-endpoint">
+            <span class="metric-label">Point d'entrée API</span>
+            <span class="metric-value font-mono">GET /health</span>
+          </div>
+          <div class="metric-item" id="metric-http-code">
+            <span class="metric-label">Code HTTP</span>
+            <span class="metric-value font-mono" id="http-code-val">—</span>
+          </div>
+          <div class="metric-item" id="metric-service-status">
+            <span class="metric-label">État du Service</span>
+            <span class="metric-value" id="service-status-val">En attente</span>
+          </div>
+          <div class="metric-item" id="metric-last-check">
+            <span class="metric-label">Dernière vérification</span>
+            <span class="metric-value font-mono" id="last-check-val">—</span>
+          </div>
+        </div>
+
+        <div class="response-section" id="response-section">
+          <div class="response-header">
+            <span class="response-title" id="response-title">Réponse brute du backend (JSON)</span>
+            <span class="response-latency font-mono" id="response-latency"></span>
+          </div>
+          <pre class="json-viewer" id="json-viewer"><code>Chargement de la réponse...</code></pre>
+        </div>
+      </section>
+
+      <section class="card architecture-card" id="architecture-card">
+        <h2 class="card-title" id="architecture-title">Chaîne de Communication Validée</h2>
+        <div class="pipeline-diagram" id="pipeline-diagram">
+          <div class="pipeline-step" id="step-browser">
+            <span class="step-badge">1. Navigateur</span>
+            <span class="step-desc">HTML / CSS / JS</span>
+          </div>
+          <div class="pipeline-arrow">→</div>
+          <div class="pipeline-step" id="step-frontend">
+            <span class="step-badge">2. Frontend Client</span>
+            <span class="step-desc">fetch('/health')</span>
+          </div>
+          <div class="pipeline-arrow">→</div>
+          <div class="pipeline-step" id="step-transport">
+            <span class="step-badge">3. Transport HTTP</span>
+            <span class="step-desc">Node.js Server</span>
+          </div>
+          <div class="pipeline-arrow">→</div>
+          <div class="pipeline-step" id="step-backend">
+            <span class="step-badge">4. API Backend</span>
+            <span class="step-desc">GET /health (JSON)</span>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="app-footer" id="app-footer">
+      <span>HOPEHOUSE Platform — Architecture découplée Frontend ↔ API Backend</span>
+    </footer>
+  </div>
+
+  <script src="/app.js" type="module"></script>
+</body>
+</html>
