@@ -13,6 +13,9 @@
     "prisma:migrate:deploy": "prisma migrate deploy",
     "prisma:migrate:status": "prisma migrate status"
   },
+  "prisma": {
+    "schema": "prisma"
+  },
   "engines": {
     "node": ">=20.0.0"
   },
