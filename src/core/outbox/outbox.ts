@@ -10,6 +10,7 @@ export interface OutboxMessage<TPayload = unknown> extends DomainEventEnvelope<T
 }
 
 export interface OutboxStore<TPayload = unknown> {
+  append(event: DomainEventEnvelope<TPayload>, availableAt?: Date): Promise<void>;
   claimBatch(
     limit: number,
     now: Date,
