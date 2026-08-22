@@ -1,4 +1,4 @@
-import type { PrismaClient } from '@prisma/client';
+import { Prisma, type PrismaClient } from '@prisma/client';
 import {
   assertValidCode,
   type Catalog,
@@ -18,21 +18,19 @@ function toJsonObject(value: unknown): JsonObject {
   return { ...(value as JsonObject) };
 }
 
-function toCatalog(record: {
-  id: string; code: string; name: string; type: string; status: Catalog['status']; metadata: unknown; createdAt: Date; updatedAt: Date;
-}): Catalog {
+function toInputJsonValue(value: JsonObject): Prisma.InputJsonValue {
+  return value as Prisma.InputJsonValue;
+}
+
+function toCatalog(record: { id: string; code: string; name: string; type: string; status: Catalog['status']; metadata: unknown; createdAt: Date; updatedAt: Date }): Catalog {
   return Object.freeze({ id: record.id, code: record.code, name: record.name, type: record.type, status: record.status, metadata: Object.freeze(toJsonObject(record.metadata)), createdAt: record.createdAt, updatedAt: record.updatedAt });
 }
 
-function toCatalogItem(record: {
-  id: string; catalogId: string; serviceDefinitionId: string | null; code: string; name: string; type: CatalogItem['type']; status: CatalogueItemStatus; metadata: unknown; validFrom: Date | null; validUntil: Date | null; createdByUserId: string | null; updatedByUserId: string | null; createdAt: Date; updatedAt: Date;
-}): CatalogItem {
+function toCatalogItem(record: { id: string; catalogId: string; serviceDefinitionId: string | null; code: string; name: string; type: CatalogItem['type']; status: CatalogueItemStatus; metadata: unknown; validFrom: Date | null; validUntil: Date | null; createdByUserId: string | null; updatedByUserId: string | null; createdAt: Date; updatedAt: Date }): CatalogItem {
   return Object.freeze({ id: record.id, catalogId: record.catalogId, serviceDefinitionId: record.serviceDefinitionId, code: record.code, name: record.name, type: record.type, status: record.status, metadata: Object.freeze(toJsonObject(record.metadata)), validFrom: record.validFrom, validUntil: record.validUntil, createdByUserId: record.createdByUserId, updatedByUserId: record.updatedByUserId, createdAt: record.createdAt, updatedAt: record.updatedAt });
 }
 
-function toServiceDefinition(record: {
-  id: string; code: string; name: string; type: ServiceDefinition['type']; networkId: string | null; providerId: string | null; status: ServiceDefinition['status']; metadata: unknown; createdAt: Date; updatedAt: Date;
-}): ServiceDefinition {
+function toServiceDefinition(record: { id: string; code: string; name: string; type: ServiceDefinition['type']; networkId: string | null; providerId: string | null; status: ServiceDefinition['status']; metadata: unknown; createdAt: Date; updatedAt: Date }): ServiceDefinition {
   return Object.freeze({ id: record.id, code: record.code, name: record.name, type: record.type, networkId: record.networkId, providerId: record.providerId, status: record.status, metadata: Object.freeze(toJsonObject(record.metadata)), createdAt: record.createdAt, updatedAt: record.updatedAt });
 }
 
@@ -70,17 +68,17 @@ export class PrismaCatalogRepository implements CatalogRepository {
   }
 
   async createCatalog(input: CreateCatalogInput): Promise<Catalog> {
-    const record = await this.client.catalog.create({ data: { id: input.id, code: assertValidCode(input.code), name: input.name.trim(), type: input.type.trim(), status: 'active', metadata: input.metadata ?? {} } });
+    const record = await this.client.catalog.create({ data: { id: input.id, code: assertValidCode(input.code), name: input.name.trim(), type: input.type.trim(), status: 'active', metadata: toInputJsonValue(input.metadata ?? {}) } });
     return toCatalog(record);
   }
 
   async createService(input: CreateServiceInput): Promise<ServiceDefinition> {
-    const record = await this.client.serviceDefinition.create({ data: { id: input.id, code: assertValidCode(input.code), name: input.name.trim(), type: input.type, networkId: input.networkId ?? null, providerId: input.providerId ?? null, status: 'draft', metadata: input.metadata ?? {} } });
+    const record = await this.client.serviceDefinition.create({ data: { id: input.id, code: assertValidCode(input.code), name: input.name.trim(), type: input.type, networkId: input.networkId ?? null, providerId: input.providerId ?? null, status: 'draft', metadata: toInputJsonValue(input.metadata ?? {}) } });
     return toServiceDefinition(record);
   }
 
   async createCatalogItem(input: CreateCatalogItemInput): Promise<CatalogItem> {
-    const record = await this.client.catalogItem.create({ data: { id: input.id, catalogId: input.catalogId, serviceDefinitionId: input.serviceDefinitionId ?? null, code: assertValidCode(input.code), name: input.name.trim(), type: input.type, status: 'inactive', metadata: input.metadata ?? {}, validFrom: input.validFrom ?? null, validUntil: input.validUntil ?? null, createdByUserId: input.actorUserId ?? null, updatedByUserId: input.actorUserId ?? null } });
+    const record = await this.client.catalogItem.create({ data: { id: input.id, catalogId: input.catalogId, serviceDefinitionId: input.serviceDefinitionId ?? null, code: assertValidCode(input.code), name: input.name.trim(), type: input.type, status: 'inactive', metadata: toInputJsonValue(input.metadata ?? {}), validFrom: input.validFrom ?? null, validUntil: input.validUntil ?? null, createdByUserId: input.actorUserId ?? null, updatedByUserId: input.actorUserId ?? null } });
     return toCatalogItem(record);
   }
 
