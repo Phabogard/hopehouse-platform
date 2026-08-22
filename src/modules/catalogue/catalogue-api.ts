@@ -1,12 +1,11 @@
 import { authorize, type Actor } from '../rbac/authorize.js';
 import type {
   CatalogueItemStatus,
-  CatalogueService,
   CreateCatalogInput,
   CreateCatalogItemInput,
   CreateServiceInput,
   ServiceDefinitionStatus,
-} from './catalogue-types.js';
+} from './catalogue.js';
 
 export interface CatalogueApiResult<T> {
   readonly statusCode: 200 | 201;
@@ -33,6 +32,23 @@ export interface CatalogueApiRequest {
   readonly id?: string;
   readonly code?: string;
   readonly body?: Record<string, unknown>;
+}
+
+function bodyObject(body: Record<string, unknown> | undefined): Record<string, unknown> {
+  if (body === undefined) throw new Error('Request body is required.');
+  return body;
+}
+
+function createCatalogInput(body: Record<string, unknown>): CreateCatalogInput {
+  return body as unknown as CreateCatalogInput;
+}
+
+function createServiceInput(body: Record<string, unknown>): CreateServiceInput {
+  return body as unknown as CreateServiceInput;
+}
+
+function createCatalogItemInput(body: Record<string, unknown>): CreateCatalogItemInput {
+  return body as unknown as CreateCatalogItemInput;
 }
 
 /**
@@ -69,17 +85,17 @@ export async function handleCatalogueApi(
 
   if (request.method === 'POST' && request.resource === 'catalog') {
     authorize(actor, 'catalogue:manage');
-    return { statusCode: 201, data: await service.createCatalog(request.body as unknown as CreateCatalogInput) };
+    return { statusCode: 201, data: await service.createCatalog(createCatalogInput(bodyObject(request.body))) };
   }
 
   if (request.method === 'POST' && request.resource === 'service') {
     authorize(actor, 'catalogue:service:manage');
-    return { statusCode: 201, data: await service.createService(request.body as unknown as CreateServiceInput) };
+    return { statusCode: 201, data: await service.createService(createServiceInput(bodyObject(request.body))) };
   }
 
   if (request.method === 'POST' && request.resource === 'catalog-items') {
     authorize(actor, 'catalogue:manage');
-    return { statusCode: 201, data: await service.createCatalogItem(request.body as unknown as CreateCatalogItemInput) };
+    return { statusCode: 201, data: await service.createCatalogItem(createCatalogItemInput(bodyObject(request.body))) };
   }
 
   if (request.method === 'PATCH' && request.resource === 'catalog' && request.id) {
