@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>HOPEHOUSE — Plateforme ERP</title>
+    <meta name="description" content="Fondation de communication Frontend ↔ Backend de la plateforme HOPEHOUSE." />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div id="app" class="layout-container">
+      <header class="app-header" id="app-header">
+        <div class="brand-container">
+          <div class="brand-logo" aria-hidden="true">H</div>
+          <div>
+            <h1 class="brand-title">HOPEHOUSE</h1>
+            <p class="brand-subtitle">Plateforme ERP &amp; Ledger Financier</p>
+          </div>
+        </div>
+        <div class="header-badge" id="env-badge">
+          <span class="badge-dot"></span>
+          <span class="badge-text">Système Actif</span>
+        </div>
+      </header>
+
+      <main class="main-content" id="main-content">
+        <!-- Status Card -->
+        <section class="card status-card" id="connection-card" aria-labelledby="status-title">
+          <div class="card-header">
+            <div>
+              <h2 id="status-title" class="card-title">État de la Communication Backend</h2>
+              <p class="card-description">Vérification temps réel du flux Frontend ↔ Backend via l'API REST.</p>
+            </div>
+            <div id="connection-indicator" class="status-pill status-loading" role="status" aria-live="polite">
+              <span class="pulse-indicator" aria-hidden="true"></span>
+              <span id="connection-status-text">Connexion en cours...</span>
+            </div>
+          </div>
+
+          <div class="metrics-grid">
+            <div class="metric-item" id="metric-service">
+              <span class="metric-label">Service</span>
+              <span class="metric-value" id="metric-service-value">—</span>
+            </div>
+            <div class="metric-item" id="metric-endpoint">
+              <span class="metric-label">Point d'entrée API</span>
+              <span class="metric-value mono" id="metric-endpoint-value">GET /health</span>
+            </div>
+            <div class="metric-item" id="metric-http-status">
+              <span class="metric-label">Statut HTTP</span>
+              <span class="metric-value" id="metric-http-status-value">—</span>
+            </div>
+            <div class="metric-item" id="metric-latency">
+              <span class="metric-label">Latence</span>
+              <span class="metric-value" id="metric-latency-value">—</span>
+            </div>
+          </div>
+
+          <div class="card-actions">
+            <button id="btn-refresh" class="btn btn-primary" type="button">
+              <span class="btn-icon" aria-hidden="true">↻</span>
+              <span>Vérifier à nouveau</span>
+            </button>
+            <span class="last-check-text" id="last-check-text">Dernière vérification : en attente</span>
+          </div>
+        </section>
+
+        <!-- Architecture Schema Card -->
+        <section class="card architecture-card" id="architecture-card">
+          <h2 class="card-title">Architecture Flux de Données</h2>
+          <p class="card-description">Cloisonnement strict des couches applicatives sans accès direct DB depuis le client.</p>
+
+          <div class="architecture-flow" aria-label="Schéma d'architecture en 4 niveaux">
+            <div class="flow-node active">
+              <span class="flow-layer">Navigateur</span>
+              <span class="flow-tech">HTML / CSS / JS</span>
+            </div>
+            <div class="flow-arrow">→</div>
+            <div class="flow-node active" id="node-http">
+              <span class="flow-layer">Transport HTTP</span>
+              <span class="flow-tech">GET /health</span>
+            </div>
+            <div class="flow-arrow">→</div>
+            <div class="flow-node active" id="node-backend">
+              <span class="flow-layer">Backend / API</span>
+              <span class="flow-tech">Node.js / TS</span>
+            </div>
+            <div class="flow-arrow">→</div>
+            <div class="flow-node" id="node-persistence">
+              <span class="flow-layer">Persistance</span>
+              <span class="flow-tech">PostgreSQL / Prisma</span>
+            </div>
+          </div>
+        </section>
+
+        <!-- Inspection Details Card -->
+        <section class="card payload-card" id="payload-card">
+          <div class="card-header">
+            <div>
+              <h2 class="card-title">Réponse Brute JSON</h2>
+              <p class="card-description">Payload reçu directement depuis le point d'entrée HTTP.</p>
+            </div>
+            <span class="badge-tag">application/json</span>
+          </div>
+          <pre class="code-block" id="raw-response-block"><code id="raw-response-code">{ "status": "en attente de réponse..." }</code></pre>
+        </section>
+      </main>
+
+      <footer class="app-footer" id="app-footer">
+        <p>HOPEHOUSE Platform &copy; 2026 — Architecture Ledger Financier &amp; ERP Sécurisé</p>
+      </footer>
+    </div>
+
+    <script src="/app.js"></script>
+  </body>
+</html>
