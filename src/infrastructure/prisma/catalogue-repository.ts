@@ -68,17 +68,20 @@ export class PrismaCatalogRepository implements CatalogRepository {
   }
 
   async createCatalog(input: CreateCatalogInput): Promise<Catalog> {
-    const record = await this.client.catalog.create({ data: { id: input.id, code: assertValidCode(input.code), name: input.name.trim(), type: input.type.trim(), status: 'active', metadata: toInputJsonValue(input.metadata ?? {}) } });
+    const now = new Date();
+    const record = await this.client.catalog.create({ data: { id: input.id, code: assertValidCode(input.code), name: input.name.trim(), type: input.type.trim(), status: 'active', metadata: toInputJsonValue(input.metadata ?? {}), createdAt: now, updatedAt: now } });
     return toCatalog(record);
   }
 
   async createService(input: CreateServiceInput): Promise<ServiceDefinition> {
-    const record = await this.client.serviceDefinition.create({ data: { id: input.id, code: assertValidCode(input.code), name: input.name.trim(), type: input.type, networkId: input.networkId ?? null, providerId: input.providerId ?? null, status: 'draft', metadata: toInputJsonValue(input.metadata ?? {}) } });
+    const now = new Date();
+    const record = await this.client.serviceDefinition.create({ data: { id: input.id, code: assertValidCode(input.code), name: input.name.trim(), type: input.type, networkId: input.networkId ?? null, providerId: input.providerId ?? null, status: 'draft', metadata: toInputJsonValue(input.metadata ?? {}), createdAt: now, updatedAt: now } });
     return toServiceDefinition(record);
   }
 
   async createCatalogItem(input: CreateCatalogItemInput): Promise<CatalogItem> {
-    const record = await this.client.catalogItem.create({ data: { id: input.id, catalogId: input.catalogId, serviceDefinitionId: input.serviceDefinitionId ?? null, code: assertValidCode(input.code), name: input.name.trim(), type: input.type, status: 'inactive', metadata: toInputJsonValue(input.metadata ?? {}), validFrom: input.validFrom ?? null, validUntil: input.validUntil ?? null, createdByUserId: input.actorUserId ?? null, updatedByUserId: input.actorUserId ?? null } });
+    const now = new Date();
+    const record = await this.client.catalogItem.create({ data: { id: input.id, catalogId: input.catalogId, serviceDefinitionId: input.serviceDefinitionId ?? null, code: assertValidCode(input.code), name: input.name.trim(), type: input.type, status: 'inactive', metadata: toInputJsonValue(input.metadata ?? {}), validFrom: input.validFrom ?? null, validUntil: input.validUntil ?? null, createdByUserId: input.actorUserId ?? null, updatedByUserId: input.actorUserId ?? null, createdAt: now, updatedAt: now } });
     return toCatalogItem(record);
   }
 
