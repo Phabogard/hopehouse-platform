@@ -19,13 +19,15 @@ export type PriceRuleStatus = CatalogueStatus;
 export type CommissionRuleStatus = CatalogueStatus;
 export type CommissionCalculationType = 'fixed' | 'percentage';
 
+type JsonObject = Record<string, unknown>;
+
 export interface Catalog {
   readonly id: string;
   readonly code: string;
   readonly name: string;
   readonly type: string;
   readonly status: CatalogueStatus;
-  readonly metadata: Record<string, unknown>;
+  readonly metadata: JsonObject;
   readonly createdAt: Date;
   readonly updatedAt: Date;
 }
@@ -38,7 +40,7 @@ export interface CatalogItem {
   readonly name: string;
   readonly type: CatalogueItemType;
   readonly status: CatalogueItemStatus;
-  readonly metadata: Record<string, unknown>;
+  readonly metadata: JsonObject;
   readonly validFrom: Date | null;
   readonly validUntil: Date | null;
   readonly createdByUserId: string | null;
@@ -55,7 +57,7 @@ export interface ServiceDefinition {
   readonly networkId: string | null;
   readonly providerId: string | null;
   readonly status: ServiceDefinitionStatus;
-  readonly metadata: Record<string, unknown>;
+  readonly metadata: JsonObject;
   readonly createdAt: Date;
   readonly updatedAt: Date;
 }
@@ -65,7 +67,7 @@ export interface ServiceMode {
   readonly serviceDefinitionId: string;
   readonly mode: ServiceModeType;
   readonly isActive: boolean;
-  readonly configuration: Record<string, unknown>;
+  readonly configuration: JsonObject;
   readonly createdAt: Date;
   readonly updatedAt: Date;
 }
@@ -79,7 +81,7 @@ export interface PriceRule {
   readonly status: PriceRuleStatus;
   readonly startsAt: Date | null;
   readonly endsAt: Date | null;
-  readonly metadata: Record<string, unknown>;
+  readonly metadata: JsonObject;
   readonly createdAt: Date;
   readonly updatedAt: Date;
 }
@@ -94,16 +96,55 @@ export interface CommissionRule {
   readonly status: CommissionRuleStatus;
   readonly startsAt: Date | null;
   readonly endsAt: Date | null;
-  readonly metadata: Record<string, unknown>;
+  readonly metadata: JsonObject;
   readonly createdAt: Date;
   readonly updatedAt: Date;
 }
 
+export interface CreateCatalogInput {
+  readonly id: string;
+  readonly code: string;
+  readonly name: string;
+  readonly type: string;
+  readonly metadata?: JsonObject;
+}
+
+export interface CreateServiceInput {
+  readonly id: string;
+  readonly code: string;
+  readonly name: string;
+  readonly type: ServiceDefinitionType;
+  readonly networkId?: string | null;
+  readonly providerId?: string | null;
+  readonly metadata?: JsonObject;
+}
+
+export interface CreateCatalogItemInput {
+  readonly id: string;
+  readonly catalogId: string;
+  readonly serviceDefinitionId?: string | null;
+  readonly code: string;
+  readonly name: string;
+  readonly type: CatalogueItemType;
+  readonly metadata?: JsonObject;
+  readonly validFrom?: Date | null;
+  readonly validUntil?: Date | null;
+  readonly actorUserId?: string | null;
+}
+
 export interface CatalogRepository {
   findCatalogByCode(code: string): Promise<Catalog | null>;
+  findCatalogById(id: string): Promise<Catalog | null>;
   findItemByCode(catalogId: string, code: string): Promise<CatalogItem | null>;
   listItems(catalogId: string, status?: CatalogueItemStatus): Promise<readonly CatalogItem[]>;
   findServiceByCode(code: string): Promise<ServiceDefinition | null>;
+  findServiceById(id: string): Promise<ServiceDefinition | null>;
+  createCatalog(input: CreateCatalogInput): Promise<Catalog>;
+  createService(input: CreateServiceInput): Promise<ServiceDefinition>;
+  createCatalogItem(input: CreateCatalogItemInput): Promise<CatalogItem>;
+  setCatalogStatus(id: string, status: CatalogueStatus, actorUserId: string): Promise<Catalog>;
+  setCatalogItemStatus(id: string, status: CatalogueItemStatus, actorUserId: string): Promise<CatalogItem>;
+  setServiceStatus(id: string, status: ServiceDefinitionStatus): Promise<ServiceDefinition>;
 }
 
 export function assertValidCode(code: string): string {
@@ -124,4 +165,8 @@ export function assertNonNegativeAmount(amountCents: number): void {
   if (!Number.isSafeInteger(amountCents) || amountCents < 0) {
     throw new Error('Amount must be a non-negative safe integer in cents.');
   }
+}
+
+export function assertCanTransitionToArchived(status: CatalogueStatus): void {
+  if (status === 'archived') throw new Error('Archived catalogue resources cannot be archived again.');
 }
