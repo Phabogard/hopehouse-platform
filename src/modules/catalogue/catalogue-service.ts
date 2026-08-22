@@ -8,11 +8,43 @@ import {
   type CreateCatalogInput,
   type CreateCatalogItemInput,
   type CreateServiceInput,
+  type CatalogueItemStatus,
   type ServiceDefinition,
 } from './catalogue.js';
 
 export class CatalogueService {
   constructor(private readonly repository: CatalogRepository) {}
+
+  async getCatalogById(id: string): Promise<Catalog> {
+    const catalog = await this.repository.findCatalogById(id);
+    if (!catalog) throw new Error('Catalog does not exist.');
+    return catalog;
+  }
+
+  async getCatalogByCode(code: string): Promise<Catalog> {
+    const normalizedCode = assertValidCode(code);
+    const catalog = await this.repository.findCatalogByCode(normalizedCode);
+    if (!catalog) throw new Error(`Catalog ${normalizedCode} does not exist.`);
+    return catalog;
+  }
+
+  async listCatalogItems(catalogId: string, status?: CatalogueItemStatus): Promise<readonly CatalogItem[]> {
+    if (!(await this.repository.findCatalogById(catalogId))) throw new Error('Catalog does not exist.');
+    return this.repository.listItems(catalogId, status);
+  }
+
+  async getServiceById(id: string): Promise<ServiceDefinition> {
+    const service = await this.repository.findServiceById(id);
+    if (!service) throw new Error('Service definition does not exist.');
+    return service;
+  }
+
+  async getServiceByCode(code: string): Promise<ServiceDefinition> {
+    const normalizedCode = assertValidCode(code);
+    const service = await this.repository.findServiceByCode(normalizedCode);
+    if (!service) throw new Error(`Service ${normalizedCode} does not exist.`);
+    return service;
+  }
 
   async createCatalog(input: CreateCatalogInput): Promise<Catalog> {
     const code = assertValidCode(input.code);
@@ -46,7 +78,7 @@ export class CatalogueService {
     return this.repository.setCatalogStatus(id, 'archived', actorUserId);
   }
 
-  async setCatalogItemStatus(id: string, status: 'active' | 'inactive' | 'archived', actorUserId: string): Promise<CatalogItem> {
+  async setCatalogItemStatus(id: string, status: CatalogueItemStatus, actorUserId: string): Promise<CatalogItem> {
     return this.repository.setCatalogItemStatus(id, status, actorUserId);
   }
 
