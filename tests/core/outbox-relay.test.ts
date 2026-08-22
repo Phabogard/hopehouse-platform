@@ -40,6 +40,7 @@ describe("OutboxRelay", () => {
     let publishedCount = 0;
     let failedCount = 0;
     const store: OutboxStore = {
+      append: async () => undefined,
       claimBatch: async () => [message],
       markPublished: async (eventId, workerId) => {
         publishedCount += 1;
@@ -72,6 +73,7 @@ describe("OutboxRelay", () => {
     let failedError: Error | undefined;
     let failedAt: Date | undefined;
     const store: OutboxStore = {
+      append: async () => undefined,
       claimBatch: async () => [{ ...message, attempts: 1 }],
       markPublished: async () => undefined,
       markFailed: async (eventId, workerId, error, nextAttemptAt) => {

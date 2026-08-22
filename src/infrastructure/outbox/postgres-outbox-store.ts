@@ -11,6 +11,46 @@ export class PostgresOutboxStore<TPayload = unknown>
 {
   constructor(private readonly db: SqlExecutor) {}
 
+  async append(event: DomainEventEnvelope<TPayload>, availableAt = new Date(event.occurredAt)): Promise<void> {
+    if (Number.isNaN(availableAt.getTime())) {
+      throw new Error("Invalid outbox availableAt timestamp");
+    }
+
+    const insert = toOutboxInsert(event);
+    const occurredAt = new Date(event.occurredAt);
+    if (Number.isNaN(occurredAt.getTime())) {
+      throw new Error("Invalid outbox occurredAt timestamp");
+    }
+
+    await this.db.$queryRawUnsafe(
+      `
+      INSERT INTO outbox_messages (
+        id,
+        event_type,
+        schema_version,
+        occurred_at,
+        correlation_id,
+        causation_id,
+        aggregate_id,
+        aggregate_type,
+        payload_json,
+        available_at
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10)
+      `,
+      insert.eventId,
+      insert.eventType,
+      insert.schemaVersion,
+      occurredAt,
+      insert.correlationId,
+      insert.causationId,
+      insert.aggregateId,
+      insert.aggregateType,
+      JSON.stringify(insert.payloadJson),
+      availableAt,
+    );
+  }
+
   async claimBatch(
     limit: number,
     now: Date,
