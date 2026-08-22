@@ -87,6 +87,7 @@ model Catalog {
 model CatalogItem {
   id String @id
   catalogId String @map("catalog_id")
+  serviceDefinitionId String? @map("service_definition_id")
   code String
   name String
   type CatalogItemType
@@ -99,9 +100,12 @@ model CatalogItem {
   createdAt DateTime @db.Timestamptz(3) @map("created_at")
   updatedAt DateTime @db.Timestamptz(3) @map("updated_at")
   catalog Catalog @relation(fields: [catalogId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  serviceDefinition ServiceDefinition? @relation(fields: [serviceDefinitionId], references: [id], onDelete: Restrict, onUpdate: Cascade)
   priceRules PriceRule[]
   commissionRules CommissionRule[]
   @@unique([catalogId, code])
+  @@unique([id, serviceDefinitionId])
+  @@index([serviceDefinitionId, status])
   @@index([catalogId, status])
   @@index([type, status])
   @@index([validFrom, validUntil])
@@ -150,6 +154,7 @@ model ServiceDefinition {
   updatedAt DateTime @db.Timestamptz(3) @map("updated_at")
   network Network? @relation(fields: [networkId], references: [id], onDelete: Restrict, onUpdate: Cascade)
   provider Provider? @relation(fields: [providerId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  catalogItems CatalogItem[]
   modes ServiceMode[]
   priceRules PriceRule[]
   commissions CommissionRule[]
@@ -186,7 +191,7 @@ model PriceRule {
   createdAt DateTime @db.Timestamptz(3) @map("created_at")
   updatedAt DateTime @db.Timestamptz(3) @map("updated_at")
   serviceDefinition ServiceDefinition @relation(fields: [serviceDefinitionId], references: [id], onDelete: Restrict, onUpdate: Cascade)
-  catalogItem CatalogItem? @relation(fields: [catalogItemId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  catalogItem CatalogItem? @relation(fields: [serviceDefinitionId, catalogItemId], references: [serviceDefinitionId, id], onDelete: Restrict, onUpdate: Cascade)
   @@index([serviceDefinitionId, currency, status])
   @@index([catalogItemId, currency, status])
   @@index([status, startsAt, endsAt])
@@ -204,10 +209,10 @@ model CommissionRule {
   startsAt DateTime? @db.Timestamptz(3) @map("starts_at")
   endsAt DateTime? @db.Timestamptz(3) @map("ends_at")
   metadata Json @map("metadata_json")
-  createdAt DateTime @db.Timestamptz(3) @map("created_at")
-  updatedAt DateTime @db.Timestamptz(3) @map("updated_at")
+  createdAt DateTime @db.Timetamptz(3) @map("created_at")
+  updatedAt DateTime @db.Timetamptz(3) @map("updated_at")
   serviceDefinition ServiceDefinition @relation(fields: [serviceDefinitionId], references: [id], onDelete: Restrict, onUpdate: Cascade)
-  catalogItem CatalogItem? @relation(fields: [catalogItemId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  catalogItem CatalogItem? @relation(fields: [serviceDefinitionId, catalogItemId], references: [serviceDefinitionId, id], onDelete: Restrict, onUpdate: Cascade)
   @@index([serviceDefinitionId, currency, status])
   @@index([catalogItemId, currency, status])
   @@index([status, startsAt, endsAt])
