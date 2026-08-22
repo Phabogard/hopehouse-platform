@@ -7,7 +7,16 @@ declare module 'node:crypto' {
 }
 
 declare module 'node:fs' {
+  export function readFileSync(path: string): Buffer;
   export function readFileSync(path: string, encoding: 'utf8'): string;
+}
+
+declare module 'node:path' {
+  export function join(...paths: string[]): string;
+  export function resolve(...paths: string[]): string;
+  export function extname(path: string): string;
+  export function normalize(path: string): string;
+  export const sep: string;
 }
 
 declare module 'node:http' {
@@ -22,7 +31,7 @@ declare module 'node:http' {
 
   export interface ServerResponse {
     writeHead(statusCode: number, headers?: Record<string, string>): void;
-    end(body?: string): void;
+    end(body?: string | Buffer): void;
   }
 
   export interface AddressInfo {
@@ -44,6 +53,7 @@ declare module 'node:assert/strict' {
     strictEqual(actual: unknown, expected: unknown, message?: string): void;
     deepEqual(actual: unknown, expected: unknown, message?: string): void;
     ok(value: unknown, message?: string): void;
+    match(value: string, regExp: RegExp, message?: string): void;
     throws(block: () => unknown, expected?: RegExp | (new (...args: never[]) => Error), message?: string): void;
     doesNotThrow(block: () => unknown, message?: string): void;
   };
@@ -64,10 +74,11 @@ declare class Buffer {
 
 declare const process: {
   env: Record<string, string | undefined>;
+  cwd(): string;
 };
 
 declare const console: {
   log(message?: unknown, ...optionalParams: unknown[]): void;
 };
 
-declare function fetch(input: string, init?: { method?: string; headers?: Record<string, string>; body?: string }): Promise<{ status: number; json(): Promise<unknown> }>;
+declare function fetch(input: string, init?: { method?: string; headers?: Record<string, string>; body?: string }): Promise<{ status: number; headers: { get(name: string): string | null }; json(): Promise<unknown>; text(): Promise<string> }>;
