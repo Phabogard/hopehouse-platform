@@ -1,4 +1,5 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
+import { join } from 'node:path';
 import { ForbiddenError, UnauthorizedError, ValidationError } from './core/errors.js';
 import { AuditLogService } from './modules/audit/audit-log.js';
 import { createBeneficiary } from './modules/beneficiaries/beneficiaries.js';
@@ -11,6 +12,8 @@ import { createSubscription } from './modules/subscriptions/subscriptions.js';
 import { createUser } from './modules/users/users.js';
 import { AuthRuntimeContext, type AuthenticatedActor, type AuthenticatedLoginResult, type AuthRuntimeOptions } from './modules/auth-security/index.js';
 import { OpenAiResponsesClient, resolveLiveAiPolicy, type AiChatProvider } from './modules/ai-assistant/openai.js';
+import { getHealthStatus } from './modules/health/health.js';
+import { serveStaticFile } from './infrastructure/http/static-files.js';
 
 const orderEngine = new OrderEngine();
 const orders = new Map<string, Order>();
@@ -40,6 +43,7 @@ export interface HopeHouseServerOptions {
   readonly authRuntime?: AuthRuntime | null;
   readonly aiClient?: AiChatProvider;
   readonly audit?: AuditLogService;
+  readonly publicDir?: string;
 }
 
 function sendJson(response: ServerResponse, statusCode: number, body: unknown): void {
@@ -185,6 +189,7 @@ export function createHopeHouseServer(options: HopeHouseServerOptions = {}) {
     : options.auth === undefined && process.env.HOPEHOUSE_JWT_SECRET === undefined ? null : new AuthRuntimeContext(options.auth);
   const aiClient = options.aiClient ?? new OpenAiResponsesClient();
   const audit = options.audit ?? new AuditLogService();
+  const publicDir = options.publicDir ?? join(process.cwd(), 'public');
 
   return createServer(async (request: IncomingMessage, response: ServerResponse) => {
     const url = new URL(request.url ?? '/', 'http://localhost');
@@ -193,8 +198,26 @@ export function createHopeHouseServer(options: HopeHouseServerOptions = {}) {
     let auditContext: SensitiveAuditContext | null = null;
 
     if (request.method === 'GET' && url.pathname === '/health') {
-      sendJson(response, 200, { data: { status: 'ok', service: 'hopehouse-platform' } });
+      const health = getHealthStatus();
+      sendJson(response, 200, {
+        status: health.status,
+        service: health.service,
+        data: { status: health.status, service: health.service },
+      });
       return;
+    }
+
+    if (
+      request.method === 'GET' &&
+      (url.pathname === '/' ||
+        url.pathname === '/index.html' ||
+        url.pathname === '/styles.css' ||
+        url.pathname === '/app.js' ||
+        url.pathname.startsWith('/public/'))
+    ) {
+      const relativePath = url.pathname === '/' ? 'index.html' : url.pathname.replace(/^\/public\//, '');
+      const served = serveStaticFile(publicDir, relativePath, response);
+      if (served) return;
     }
 
     try {
