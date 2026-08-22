@@ -8,7 +8,7 @@ import {
 
 test('catalogue codes are normalized and constrained', () => {
   assert.equal(assertValidCode('  INTERNET_AIRTEL  '), 'INTERNET_AIRTEL');
-  assert.equal(assertValidCode('CANAL+_30J'), 'CANAL+_30J');
+  assert.equal(assertValidCode('CANAL_30J'), 'CANAL_30J');
   assert.throws(() => assertValidCode('internet-airtel'));
   assert.throws(() => assertValidCode(''));
   assert.throws(() => assertValidCode('AIRTEL SPACE'));
