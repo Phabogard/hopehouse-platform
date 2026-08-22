@@ -1,16 +1,73 @@
 // Hope House — Catalogue core V1
 // Domain entities are configuration-driven; concrete networks/providers/services are never hard-coded.
 
-enum CatalogStatus { active inactive archived }
-enum CatalogItemType { service plan unit accessory other }
-enum CatalogItemStatus { active inactive archived }
-enum ServiceDefinitionType { mobile_credit internet voice sms electricity tv accessory ai messaging other }
-enum ServiceDefinitionStatus { draft active inactive archived }
-enum ServiceModeType { manual semi_automatic automatic }
-enum PriceRuleStatus { active inactive archived }
-enum CommissionCalculationType { fixed percentage }
-enum CommissionRuleStatus { active inactive archived }
-enum CatalogueCurrency { USD CDF }
+enum CatalogStatus {
+  active
+  inactive
+  archived
+}
+
+enum CatalogItemType {
+  service
+  plan
+  unit
+  accessory
+  other
+}
+
+enum CatalogItemStatus {
+  active
+  inactive
+  archived
+}
+
+enum ServiceDefinitionType {
+  mobile_credit
+  internet
+  voice
+  sms
+  electricity
+  tv
+  accessory
+  ai
+  messaging
+  other
+}
+
+enum ServiceDefinitionStatus {
+  draft
+  active
+  inactive
+  archived
+}
+
+enum ServiceModeType {
+  manual
+  semi_automatic
+  automatic
+}
+
+enum PriceRuleStatus {
+  active
+  inactive
+  archived
+}
+
+enum CommissionCalculationType {
+  fixed
+  percentage
+}
+
+enum CommissionRuleStatus {
+  active
+  inactive
+  archived
+}
+
+enum CatalogueCurrency {
+  USD
+  CDF
+}
 
 model Catalog {
   id String @id
