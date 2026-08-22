@@ -584,7 +584,7 @@ test('7. P2002 strict classification: TEST A — transactionKey meta.target trig
 
 test('8. P2002 strict classification: TEST B — reversalOfTransactionId meta.target propagates error', async () => {
   const prisma = createMockPrismaClient();
-  await prisma.wallet.create({ id: 'w-p2002-b', ownerType: 'USER', ownerId: 'u-b', status: 'ACTIVE' });
+  await prisma.wallet.create({ data: { id: 'w-p2002-b', ownerType: 'USER', ownerId: 'u-b', status: 'ACTIVE' } });
 
   const throwingPrisma = {
     ...prisma,
@@ -619,7 +619,7 @@ test('8. P2002 strict classification: TEST B — reversalOfTransactionId meta.ta
 
 test('9. P2002 strict classification: TEST C — other constraint meta.target (id) propagates error', async () => {
   const prisma = createMockPrismaClient();
-  await prisma.wallet.create({ id: 'w-p2002-c', ownerType: 'USER', ownerId: 'u-c', status: 'ACTIVE' });
+  await prisma.wallet.create({ data: { id: 'w-p2002-c', ownerType: 'USER', ownerId: 'u-c', status: 'ACTIVE' } });
 
   const throwingPrisma = {
     ...prisma,
@@ -654,7 +654,7 @@ test('9. P2002 strict classification: TEST C — other constraint meta.target (i
 
 test('10. P2002 strict classification: TEST D — missing target propagates error', async () => {
   const prisma = createMockPrismaClient();
-  await prisma.wallet.create({ id: 'w-p2002-d', ownerType: 'USER', ownerId: 'u-d', status: 'ACTIVE' });
+  await prisma.wallet.create({ data: { id: 'w-p2002-d', ownerType: 'USER', ownerId: 'u-d', status: 'ACTIVE' } });
 
   const throwingPrisma = {
     ...prisma,
