@@ -8,6 +8,21 @@ declare module 'node:crypto' {
 
 declare module 'node:fs' {
   export function readFileSync(path: string, encoding: 'utf8'): string;
+  export function readFileSync(path: string): Buffer;
+  export function existsSync(path: string): boolean;
+  export function statSync(path: string): { isFile(): boolean; size: number };
+}
+
+declare module 'node:path' {
+  export function join(...paths: string[]): string;
+  export function normalize(path: string): string;
+  export function resolve(...paths: string[]): string;
+  export function extname(path: string): string;
+  export function dirname(path: string): string;
+}
+
+declare module 'node:url' {
+  export function fileURLToPath(url: string | URL): string;
 }
 
 declare module 'node:http' {
@@ -21,8 +36,8 @@ declare module 'node:http' {
   }
 
   export interface ServerResponse {
-    writeHead(statusCode: number, headers?: Record<string, string>): void;
-    end(body?: string): void;
+    writeHead(statusCode: number, headers?: Record<string, string | number>): void;
+    end(body?: string | Buffer): void;
   }
 
   export interface AddressInfo {
@@ -46,6 +61,7 @@ declare module 'node:assert/strict' {
     ok(value: unknown, message?: string): void;
     throws(block: () => unknown, expected?: RegExp | (new (...args: never[]) => Error), message?: string): void;
     doesNotThrow(block: () => unknown, message?: string): void;
+    match(actual: string, regexp: RegExp, message?: string): void;
   };
   export default assert;
 }
@@ -64,10 +80,19 @@ declare class Buffer {
 
 declare const process: {
   env: Record<string, string | undefined>;
+  cwd(): string;
 };
 
 declare const console: {
   log(message?: unknown, ...optionalParams: unknown[]): void;
 };
 
-declare function fetch(input: string, init?: { method?: string; headers?: Record<string, string>; body?: string }): Promise<{ status: number; json(): Promise<unknown> }>;
+declare function fetch(input: string, init?: { method?: string; headers?: Record<string, string>; body?: string }): Promise<{
+  status: number;
+  ok: boolean;
+  statusText?: string;
+  headers: { get(name: string): string | null };
+  json(): Promise<unknown>;
+  text(): Promise<string>;
+}>;
+
