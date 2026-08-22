@@ -1,4 +1,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
+import { existsSync, readFileSync, statSync } from 'node:fs';
+import { join, normalize, extname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { ForbiddenError, UnauthorizedError, ValidationError } from './core/errors.js';
 import { AuditLogService } from './modules/audit/audit-log.js';
 import { createBeneficiary } from './modules/beneficiaries/beneficiaries.js';
@@ -40,6 +43,62 @@ export interface HopeHouseServerOptions {
   readonly authRuntime?: AuthRuntime | null;
   readonly aiClient?: AiChatProvider;
   readonly audit?: AuditLogService;
+}
+
+const MIME_TYPES: Record<string, string> = {
+  '.html': 'text/html; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8',
+  '.mjs': 'text/javascript; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.svg': 'image/svg+xml',
+  '.ico': 'image/x-icon',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.txt': 'text/plain; charset=utf-8',
+};
+
+function resolvePublicDirectory(): string {
+  const cwdPublic = join(process.cwd(), 'public');
+  if (existsSync(cwdPublic)) return cwdPublic;
+  try {
+    const modulePublic = fileURLToPath(new URL('../../public', import.meta.url));
+    if (existsSync(modulePublic)) return modulePublic;
+  } catch {
+    // fallback
+  }
+  return cwdPublic;
+}
+
+function tryServeStaticFile(pathname: string, response: ServerResponse): boolean {
+  const publicDir = resolvePublicDirectory();
+  if (!existsSync(publicDir)) return false;
+
+  let relativePath = pathname === '/' ? '/index.html' : pathname;
+  if (relativePath.startsWith('/public/')) {
+    relativePath = relativePath.slice('/public'.length);
+  }
+
+  const normalized = normalize(relativePath).replace(/^(\.\.[\/\\])+/, '');
+  const absolutePath = resolve(publicDir, `.${normalized}`);
+
+  if (!absolutePath.startsWith(publicDir)) {
+    return false;
+  }
+
+  if (existsSync(absolutePath) && statSync(absolutePath).isFile()) {
+    const ext = extname(absolutePath).toLowerCase();
+    const contentType = MIME_TYPES[ext] ?? 'application/octet-stream';
+    const content = readFileSync(absolutePath);
+    response.writeHead(200, {
+      'content-type': contentType,
+    });
+    response.end(content);
+    return true;
+  }
+
+  return false;
 }
 
 function sendJson(response: ServerResponse, statusCode: number, body: unknown): void {
@@ -193,8 +252,17 @@ export function createHopeHouseServer(options: HopeHouseServerOptions = {}) {
     let auditContext: SensitiveAuditContext | null = null;
 
     if (request.method === 'GET' && url.pathname === '/health') {
-      sendJson(response, 200, { data: { status: 'ok', service: 'hopehouse-platform' } });
+      sendJson(response, 200, {
+        status: 'ok',
+        data: { status: 'ok', service: 'hopehouse-platform' },
+      });
       return;
+    }
+
+    if (request.method === 'GET' && (url.pathname === '/' || url.pathname === '/index.html' || url.pathname === '/styles.css' || url.pathname === '/app.js' || url.pathname.startsWith('/public/'))) {
+      if (tryServeStaticFile(url.pathname, response)) {
+        return;
+      }
     }
 
     try {
