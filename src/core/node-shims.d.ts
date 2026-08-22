@@ -7,6 +7,7 @@ declare module 'node:crypto' {
 }
 
 declare module 'node:fs' {
+  export function readFileSync(path: string): Buffer;
   export function readFileSync(path: string, encoding: 'utf8'): string;
 }
 
@@ -15,6 +16,7 @@ declare module 'node:path' {
   export function resolve(...paths: string[]): string;
   export function extname(path: string): string;
   export function normalize(path: string): string;
+  export const sep: string;
 }
 
 declare module 'node:http' {
@@ -29,7 +31,7 @@ declare module 'node:http' {
 
   export interface ServerResponse {
     writeHead(statusCode: number, headers?: Record<string, string>): void;
-    end(body?: string): void;
+    end(body?: string | Buffer): void;
   }
 
   export interface AddressInfo {
