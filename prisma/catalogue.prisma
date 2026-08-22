@@ -1,0 +1,220 @@
+// Hope House — Catalogue core V1
+// Domain entities are configuration-driven; concrete networks/providers/services are never hard-coded.
+
+enum CatalogStatus {
+  active
+  inactive
+  archived
+}
+
+enum CatalogItemType {
+  service
+  plan
+  unit
+  accessory
+  other
+}
+
+enum CatalogItemStatus {
+  active
+  inactive
+  archived
+}
+
+enum ServiceDefinitionType {
+  mobile_credit
+  internet
+  voice
+  sms
+  electricity
+  tv
+  accessory
+  ai
+  messaging
+  other
+}
+
+enum ServiceDefinitionStatus {
+  draft
+  active
+  inactive
+  archived
+}
+
+enum ServiceModeType {
+  manual
+  semi_automatic
+  automatic
+}
+
+enum PriceRuleStatus {
+  active
+  inactive
+  archived
+}
+
+enum CommissionCalculationType {
+  fixed
+  percentage
+}
+
+enum CommissionRuleStatus {
+  active
+  inactive
+  archived
+}
+
+enum CatalogueCurrency {
+  USD
+  CDF
+}
+
+model Catalog {
+  id String @id
+  code String @unique
+  name String
+  type String
+  status CatalogStatus
+  metadata Json @map("metadata_json")
+  createdAt DateTime @db.Timestamptz(3) @map("created_at")
+  updatedAt DateTime @db.Timestamptz(3) @map("updated_at")
+  items CatalogItem[]
+  @@index([status])
+  @@index([type, status])
+  @@map("catalogs")
+}
+
+model CatalogItem {
+  id String @id
+  catalogId String @map("catalog_id")
+  serviceDefinitionId String? @map("service_definition_id")
+  code String
+  name String
+  type CatalogItemType
+  status CatalogItemStatus
+  metadata Json @map("metadata_json")
+  validFrom DateTime? @db.Timestamptz(3) @map("valid_from")
+  validUntil DateTime? @db.Timestamptz(3) @map("valid_until")
+  createdByUserId String? @map("created_by_user_id")
+  updatedByUserId String? @map("updated_by_user_id")
+  createdAt DateTime @db.Timestamptz(3) @map("created_at")
+  updatedAt DateTime @db.Timestamptz(3) @map("updated_at")
+  catalog Catalog @relation(fields: [catalogId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  serviceDefinition ServiceDefinition? @relation(fields: [serviceDefinitionId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  priceRules PriceRule[]
+  commissionRules CommissionRule[]
+  @@unique([catalogId, code])
+  @@unique([id, serviceDefinitionId])
+  @@index([serviceDefinitionId, status])
+  @@index([catalogId, status])
+  @@index([type, status])
+  @@index([validFrom, validUntil])
+  @@index([createdByUserId])
+  @@index([updatedByUserId])
+  @@map("catalog_items")
+}
+
+model Network {
+  id String @id
+  code String @unique
+  name String
+  status CatalogStatus
+  metadata Json @map("metadata_json")
+  createdAt DateTime @db.Timestamptz(3) @map("created_at")
+  updatedAt DateTime @db.Timestamptz(3) @map("updated_at")
+  services ServiceDefinition[]
+  @@index([status])
+  @@map("networks")
+}
+
+model Provider {
+  id String @id
+  code String @unique
+  name String
+  type String
+  status CatalogStatus
+  metadata Json @map("metadata_json")
+  createdAt DateTime @db.Timestamptz(3) @map("created_at")
+  updatedAt DateTime @db.Timestamptz(3) @map("updated_at")
+  services ServiceDefinition[]
+  @@index([type, status])
+  @@map("providers")
+}
+
+model ServiceDefinition {
+  id String @id
+  code String @unique
+  name String
+  type ServiceDefinitionType
+  networkId String? @map("network_id")
+  providerId String? @map("provider_id")
+  status ServiceDefinitionStatus
+  metadata Json @map("metadata_json")
+  createdAt DateTime @db.Timestamptz(3) @map("created_at")
+  updatedAt DateTime @db.Timestamptz(3) @map("updated_at")
+  network Network? @relation(fields: [networkId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  provider Provider? @relation(fields: [providerId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  catalogItems CatalogItem[]
+  modes ServiceMode[]
+  priceRules PriceRule[]
+  commissions CommissionRule[]
+  @@index([networkId, status])
+  @@index([providerId, status])
+  @@index([type, status])
+  @@map("service_definitions")
+}
+
+model ServiceMode {
+  id String @id
+  serviceDefinitionId String @map("service_definition_id")
+  mode ServiceModeType
+  isActive Boolean @map("is_active")
+  configuration Json @map("configuration_json")
+  createdAt DateTime @db.Timestamptz(3) @map("created_at")
+  updatedAt DateTime @db.Timestamptz(3) @map("updated_at")
+  serviceDefinition ServiceDefinition @relation(fields: [serviceDefinitionId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  @@unique([serviceDefinitionId, mode])
+  @@index([serviceDefinitionId, isActive])
+  @@map("service_modes")
+}
+
+model PriceRule {
+  id String @id
+  serviceDefinitionId String @map("service_definition_id")
+  catalogItemId String? @map("catalog_item_id")
+  currency CatalogueCurrency
+  amountCents Int @map("amount_cents")
+  status PriceRuleStatus
+  startsAt DateTime? @db.Timestamptz(3) @map("starts_at")
+  endsAt DateTime? @db.Timestamptz(3) @map("ends_at")
+  metadata Json @map("metadata_json")
+  createdAt DateTime @db.Timestamptz(3) @map("created_at")
+  updatedAt DateTime @db.Timestamptz(3) @map("updated_at")
+  serviceDefinition ServiceDefinition @relation(fields: [serviceDefinitionId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  catalogItem CatalogItem? @relation(fields: [serviceDefinitionId, catalogItemId], references: [serviceDefinitionId, id], onDelete: Restrict, onUpdate: Cascade)
+  @@index([serviceDefinitionId, currency, status])
+  @@index([catalogItemId, currency, status])
+  @@index([status, startsAt, endsAt])
+  @@map("price_rules")
+}
+
+model CommissionRule {
+  id String @id
+  serviceDefinitionId String @map("service_definition_id")
+  catalogItemId String? @map("catalog_item_id")
+  currency CatalogueCurrency
+  calculationType CommissionCalculationType @map("calculation_type")
+  value Int
+  status CommissionRuleStatus
+  startsAt DateTime? @db.Timestamptz(3) @map("starts_at")
+  endsAt DateTime? @db.Timestamptz(3) @map("ends_at")
+  metadata Json @map("metadata_json")
+  createdAt DateTime @db.Timestamptz(3) @map("created_at")
+  updatedAt DateTime @db.Timestamptz(3) @map("updated_at")
+  serviceDefinition ServiceDefinition @relation(fields: [serviceDefinitionId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  catalogItem CatalogItem? @relation(fields: [serviceDefinitionId, catalogItemId], references: [serviceDefinitionId, id], onDelete: Restrict, onUpdate: Cascade)
+  @@index([serviceDefinitionId, currency, status])
+  @@index([catalogItemId, currency, status])
+  @@index([status, startsAt, endsAt])
+  @@map("commission_rules")
+}
