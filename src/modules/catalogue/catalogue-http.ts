@@ -63,12 +63,16 @@ export interface CatalogueHttpResult {
   readonly statusCode?: number;
 }
 
-function parseCatalogueRequest(method: string | undefined, url: URL, body?: JsonObject): CatalogueApiRequest | null {
+export function parseCatalogueRequest(method: string | undefined, url: URL, body?: JsonObject): CatalogueApiRequest | null {
   const segments = url.pathname.split('/').filter(Boolean);
   if (segments[0] !== 'catalogue') return null;
 
   if (segments[1] === 'catalogs') {
-    if (segments.length === 2 && method === 'GET') return { method: 'GET', resource: 'catalog', code: url.searchParams.get('code') ?? undefined };
+    if (segments.length === 2 && method === 'GET') {
+      const code = url.searchParams.get('code');
+      if (code === null || code.trim().length === 0) throw new ValidationError('Le paramètre code est obligatoire');
+      return { method: 'GET', resource: 'catalog', code };
+    }
     if (segments.length === 2 && method === 'POST') return { method: 'POST', resource: 'catalog', body };
     if (segments.length === 3 && method === 'PATCH') return { method: 'PATCH', resource: 'catalog', id: segments[2], body };
     if (segments.length === 3 && method === 'GET') return { method: 'GET', resource: 'catalog', id: segments[2] };
@@ -76,13 +80,21 @@ function parseCatalogueRequest(method: string | undefined, url: URL, body?: Json
 
   if (segments[1] === 'catalog-items') {
     if (segments.length === 2 && method === 'POST') return { method: 'POST', resource: 'catalog-items', body };
-    if (segments.length === 2 && method === 'GET') return { method: 'GET', resource: 'catalog-items', id: url.searchParams.get('catalogId') ?? undefined, body: url.searchParams.has('status') ? { status: url.searchParams.get('status') } : undefined };
+    if (segments.length === 2 && method === 'GET') {
+      const catalogId = url.searchParams.get('catalogId');
+      if (catalogId === null || catalogId.trim().length === 0) throw new ValidationError('Le paramètre catalogId est obligatoire');
+      return { method: 'GET', resource: 'catalog-items', id: catalogId, body: url.searchParams.has('status') ? { status: url.searchParams.get('status') } : undefined };
+    }
     if (segments.length === 3 && method === 'PATCH') return { method: 'PATCH', resource: 'catalog-items', id: segments[2], body };
   }
 
   if (segments[1] === 'services') {
     if (segments.length === 2 && method === 'POST') return { method: 'POST', resource: 'service', body };
-    if (segments.length === 2 && method === 'GET') return { method: 'GET', resource: 'service', code: url.searchParams.get('code') ?? undefined };
+    if (segments.length === 2 && method === 'GET') {
+      const code = url.searchParams.get('code');
+      if (code === null || code.trim().length === 0) throw new ValidationError('Le paramètre code est obligatoire');
+      return { method: 'GET', resource: 'service', code };
+    }
     if (segments.length === 3 && method === 'GET') return { method: 'GET', resource: 'service', id: segments[2] };
     if (segments.length === 3 && method === 'PATCH') return { method: 'PATCH', resource: 'service', id: segments[2], body };
   }
@@ -107,7 +119,14 @@ export async function handleCatalogueHttp(
       return { handled: true, statusCode: 404 };
     }
 
-    const authenticated = await auth.authenticateAccessToken(bearerToken(request));
+    let authenticated: { id: string; role: Actor['role'] };
+    try {
+      authenticated = await auth.authenticateAccessToken(bearerToken(request));
+    } catch (error) {
+      if (error instanceof ForbiddenError) throw new UnauthorizedError(error.message);
+      throw error;
+    }
+
     const result = await handleCatalogueApi({ id: authenticated.id, role: authenticated.role }, service, catalogueRequest);
     sendJson(response, result.statusCode, { data: result.data });
     return { handled: true, statusCode: result.statusCode };
