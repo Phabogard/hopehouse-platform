@@ -66,7 +66,7 @@ test('catalogue HTTP adapter maps forbidden catalogue operations to 403', async 
   const output = response();
   const body = JSON.stringify({ id: 'cat-1', code: 'CAT', name: 'Catalogue', type: 'service' });
   const input = request('POST', '/catalogue/catalogs');
-  process.nextTick(() => { input.emit('data', Buffer.from(body)); input.emit('end'); });
+  queueMicrotask(() => { input.emit('data', Buffer.from(body)); input.emit('end'); });
   const result = await handleCatalogueHttp(auth, service, input, output as never);
   assert.equal(result.statusCode, 403);
 });
