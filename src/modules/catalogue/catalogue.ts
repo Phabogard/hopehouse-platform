@@ -77,13 +77,27 @@ export interface PriceRule {
   readonly serviceDefinitionId: string;
   readonly catalogItemId: string | null;
   readonly currency: CatalogueCurrency;
-  readonly amountCents: number;
+  readonly amountCents: bigint;
   readonly status: PriceRuleStatus;
   readonly startsAt: Date | null;
   readonly endsAt: Date | null;
   readonly metadata: JsonObject;
   readonly createdAt: Date;
   readonly updatedAt: Date;
+}
+
+export interface PriceRuleDto {
+  readonly id: string;
+  readonly serviceDefinitionId: string;
+  readonly catalogItemId: string | null;
+  readonly currency: CatalogueCurrency;
+  readonly amountCents: number;
+  readonly status: PriceRuleStatus;
+  readonly startsAt: string | null;
+  readonly endsAt: string | null;
+  readonly metadata: JsonObject;
+  readonly createdAt: string;
+  readonly updatedAt: string;
 }
 
 export interface CommissionRule {
@@ -161,10 +175,36 @@ export function assertValidDateRange(validFrom: Date | null, validUntil: Date | 
   }
 }
 
-export function assertNonNegativeAmount(amountCents: number): void {
+export function assertNonNegativeAmount(amountCents: number | bigint): void {
+  if (typeof amountCents === 'bigint') {
+    if (amountCents < 0n || amountCents > BigInt(Number.MAX_SAFE_INTEGER)) {
+      throw new Error('Amount must be a non-negative safe integer in cents.');
+    }
+    return;
+  }
   if (!Number.isSafeInteger(amountCents) || amountCents < 0) {
     throw new Error('Amount must be a non-negative safe integer in cents.');
   }
+}
+
+export function toPriceRuleDto(rule: PriceRule): PriceRuleDto {
+  const num = Number(rule.amountCents);
+  if (!Number.isSafeInteger(num) || num < 0) {
+    throw new Error('Database BigInt value ' + rule.amountCents + ' is outside JavaScript safe integer range');
+  }
+  return Object.freeze({
+    id: rule.id,
+    serviceDefinitionId: rule.serviceDefinitionId,
+    catalogItemId: rule.catalogItemId,
+    currency: rule.currency,
+    amountCents: num,
+    status: rule.status,
+    startsAt: rule.startsAt ? rule.startsAt.toISOString() : null,
+    endsAt: rule.endsAt ? rule.endsAt.toISOString() : null,
+    metadata: rule.metadata,
+    createdAt: rule.createdAt.toISOString(),
+    updatedAt: rule.updatedAt.toISOString(),
+  });
 }
 
 export function assertCanTransitionToArchived(status: CatalogueStatus): void {

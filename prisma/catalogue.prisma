@@ -183,7 +183,7 @@ model PriceRule {
   serviceDefinitionId String @map("service_definition_id")
   catalogItemId String? @map("catalog_item_id")
   currency CatalogueCurrency
-  amountCents Int @map("amount_cents")
+  amountCents BigInt @map("amount_cents")
   status PriceRuleStatus
   startsAt DateTime? @db.Timestamptz(3) @map("starts_at")
   endsAt DateTime? @db.Timestamptz(3) @map("ends_at")
