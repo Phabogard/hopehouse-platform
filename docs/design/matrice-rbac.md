@@ -32,6 +32,13 @@
 | invoices:manage | non | non | non | non | oui | non | non |
 | accounting:export | non | non | non | non | oui | oui | non |
 | audit:read | oui | non | non | non | non | non | oui |
+| catalogue:read | oui | oui | oui | non | non | non | non |
+| catalogue:manage | oui | oui | non | non | non | non | non |
+| catalogue:activate | oui | oui | non | non | non | non | non |
+| catalogue:archive | oui | oui | non | non | non | non | non |
+| catalogue:price:manage | oui | oui | non | non | non | non | non |
+| catalogue:commission:manage | oui | oui | non | non | non | non | non |
+| catalogue:service:manage | oui | oui | non | non | non | non | non |
 
 ## Règles
 
