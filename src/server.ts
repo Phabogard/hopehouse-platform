@@ -10,5 +10,4 @@ void createPrismaCatalogueServer()
   })
   .catch((error: unknown) => {
     console.error('Unable to start Hope House ERP API', error);
-    process.exitCode = 1;
   });
