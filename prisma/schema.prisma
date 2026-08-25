@@ -328,7 +328,7 @@ model PasswordResetRequest {
   tokenHash      String              @unique @map("token_hash")
   status         PasswordResetStatus
   expiresAt      DateTime            @db.Timestamptz(3) @map("expires_at")
-  completedAt    DateTime?           @map("completed_at")
+  completedAt    DateTime?           @db.Timestamptz(3) @map("completed_at")
   createdAt      DateTime             @db.Timestamptz(3) @map("created_at")
   metadata       Json                @map("metadata_json")
 
@@ -415,7 +415,7 @@ model OutboxMessage {
   aggregateType String   @map("aggregate_type")
   payloadJson   Json     @map("payload_json")
   attempts      Int      @default(0)
-  availableAt   DateTime @map("available_at") @db.Timestamptz(3)
+  availableAt   DateTime @db.Timestamptz(3) @map("available_at")
   publishedAt   DateTime? @map("published_at") @db.Timestamptz(3)
   lastError     String?  @map("last_error")
   leaseOwner    String?  @map("lease_owner")
@@ -546,7 +546,7 @@ model WalletReservation {
   id                     String                  @id @map("id")
   walletId               String                  @map("wallet_id")
   currency               String                  @map("currency")
-  amountCents             BigInt                  @map("amount_cents")
+  amountCents            BigInt                  @map("amount_cents")
   status                 WalletReservationStatus @default(ACTIVE) @map("status")
   relatedEntityType      String?                 @map("related_entity_type")
   relatedEntityId        String?                 @map("related_entity_id")
