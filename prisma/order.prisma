@@ -1,0 +1,91 @@
+model Order {
+  id                  String  @id
+  orderNumber         String? @unique @map("order_number")
+  requesterUserId     String? @map("requester_user_id")
+  clientProfileId     String? @map("client_profile_id")
+  agentProfileId      String? @map("agent_profile_id")
+  currentStep         String  @map("current_step")
+  serviceDefinitionId String  @map("service_definition_id")
+  mode                String
+  beneficiaryId       String? @map("beneficiary_id")
+  channel             String?
+  currency            String?
+  totalCents          Int?    @map("total_cents")
+  metadataJson        String  @map("metadata_json")
+  createdAt           String  @map("created_at")
+  updatedAt           String  @map("updated_at")
+
+  requesterUser     User?             @relation("OrderRequester", fields: [requesterUserId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  clientProfile     ClientProfile?    @relation("OrderClientProfile", fields: [clientProfileId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  agentProfile      AgentProfile?     @relation("OrderAgentProfile", fields: [agentProfileId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  serviceDefinition ServiceDefinition @relation("OrderServiceDefinition", fields: [serviceDefinitionId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  items       OrderItem[]
+  steps       OrderStep[]
+  transitions OrderTransition[]
+
+  @@map("orders")
+}
+
+model OrderItem {
+  id                  String @id
+  orderId             String @map("order_id")
+  serviceDefinitionId String @map("service_definition_id")
+  quantity            Int
+  unitPriceCents      Int    @map("unit_price_cents")
+  totalCents          Int    @map("total_cents")
+  metadataJson        String @map("metadata_json")
+
+  order             Order            @relation(fields: [orderId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  serviceDefinition ServiceDefinition @relation("OrderItemServiceDefinition", fields: [serviceDefinitionId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@map("order_items")
+}
+
+model OrderStep {
+  id            String  @id
+  orderId       String  @map("order_id")
+  step          String
+  status        String
+  actorUserId   String? @map("actor_user_id")
+  occurredAt    String  @map("occurred_at")
+  metadataJson  String  @map("metadata_json")
+
+  order     Order @relation(fields: [orderId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  actorUser User? @relation("OrderStepActor", fields: [actorUserId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@map("order_steps")
+}
+
+model OrderAttempt {
+  id                     String  @id
+  requesterUserId        String? @map("requester_user_id")
+  serviceDefinitionId    String? @map("service_definition_id")
+  reason                 String
+  currency               String?
+  requestedAmountCents   Int?    @map("requested_amount_cents")
+  availableAmountCents   Int?    @map("available_amount_cents")
+  occurredAt             String  @map("occurred_at")
+  metadataJson           String  @map("metadata_json")
+
+  requesterUser     User?             @relation("OrderAttemptRequester", fields: [requesterUserId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  serviceDefinition ServiceDefinition? @relation("OrderAttemptServiceDefinition", fields: [serviceDefinitionId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@map("order_attempts")
+}
+
+model OrderTransition {
+  id           String  @id
+  orderId      String  @map("order_id")
+  fromStep     String? @map("from_step")
+  toStep       String  @map("to_step")
+  outcome      String
+  actorUserId  String? @map("actor_user_id")
+  occurredAt   String  @map("occurred_at")
+  metadataJson String  @map("metadata_json")
+
+  order     Order @relation(fields: [orderId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  actorUser User? @relation("OrderTransitionActor", fields: [actorUserId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@map("order_transitions")
+}
