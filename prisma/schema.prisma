@@ -416,6 +416,17 @@ model AuditLog {
   @@map("audit_logs")
 }
 
+model IdempotencyRecord {
+  key             String
+  operation       String
+  resultReference String?  @map("result_reference")
+  createdAt       DateTime @db.Timestamptz(3) @map("created_at")
+
+  @@id([key, operation])
+  @@index([createdAt], map: "idempotency_records_created_at_idx")
+  @@map("idempotency_records")
+}
+
 // ==========================================
 // MODULE WALLETS (OPTION B - FK COMPOSITES)
 // ==========================================

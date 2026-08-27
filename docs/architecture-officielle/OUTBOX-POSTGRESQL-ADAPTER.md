@@ -1,7 +1,7 @@
 # Outbox PostgreSQL adapter contract
 
 ## Status
-Proposed implementation contract
+Implemented PostgreSQL adapter contract
 
 ## Transaction boundary
 
@@ -33,4 +33,6 @@ Outbox payloads must not contain plaintext credentials, secrets, session tokens,
 
 ## Prisma compatibility
 
-The current HopeHouse Prisma schema is intentionally not modified by this contract yet. The SQL migration is the source-of-truth candidate for the PostgreSQL table until the Prisma model is added after migration review.
+`prisma/schema.prisma` contains the `OutboxMessage` model and all non-partial indexes from the PostgreSQL contract. The migration remains the source of truth for `outbox_messages_pending_idx` and `outbox_messages_lease_idx`, because Prisma cannot model their `WHERE published_at IS NULL` predicates without widening the indexes.
+
+`PostgresOutboxStore` uses one atomic `WITH candidates ... FOR UPDATE SKIP LOCKED ... UPDATE ... RETURNING` statement to claim and lease rows. It validates the batch limit, worker identifier, lease duration, and timestamps before issuing SQL. Its `append` operation accepts a Prisma client or Prisma transaction client so callers can persist the business mutation and the Outbox row in the same transaction.
