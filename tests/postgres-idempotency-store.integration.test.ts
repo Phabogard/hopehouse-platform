@@ -21,13 +21,13 @@ test('postgres idempotency store enforces duplicate safety under concurrent writ
       storeA.save({
         key,
         operation,
-        resultReference: 'result-a',
+        resultReference: 'payment-1',
         createdAt: '2026-08-20T10:00:00.000Z',
       }),
       storeB.save({
         key,
         operation,
-        resultReference: 'result-b',
+        resultReference: 'payment-1',
         createdAt: '2026-08-20T10:00:01.000Z',
       }),
     ]);
@@ -39,12 +39,13 @@ test('postgres idempotency store enforces duplicate safety under concurrent writ
     `;
 
     assert.equal(rows.length, 1);
-    assert.ok(rows[0]?.result_reference === 'result-a' || rows[0]?.result_reference === 'result-b');
+    assert.equal(rows[0]?.result_reference, 'payment-1');
 
     const persisted = await storeA.find(key, operation);
     assert.ok(persisted !== null);
     assert.equal(persisted.key, key);
     assert.equal(persisted.operation, operation);
+    assert.equal(persisted.resultReference, 'payment-1');
   } finally {
     await clientA.$executeRaw`
       DELETE FROM "idempotency_records"
