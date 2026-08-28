@@ -57,6 +57,19 @@ export class PostgresOutboxStore<TPayload = unknown>
     workerId: string,
     leaseMs: number,
   ): Promise<OutboxMessage<TPayload>[]> {
+    if (!Number.isInteger(limit) || limit <= 0) {
+      throw new Error("Outbox claim limit must be a positive integer");
+    }
+    if (Number.isNaN(now.getTime())) {
+      throw new Error("Invalid outbox claim timestamp");
+    }
+    if (workerId.trim().length === 0) {
+      throw new Error("Outbox workerId must not be empty");
+    }
+    if (!Number.isSafeInteger(leaseMs) || leaseMs <= 0) {
+      throw new Error("Outbox leaseMs must be a positive safe integer");
+    }
+
     const rows = await this.db.$queryRawUnsafe<Array<Record<string, unknown>>>(
       `
       WITH candidates AS (
@@ -90,6 +103,10 @@ export class PostgresOutboxStore<TPayload = unknown>
     workerId: string,
     publishedAt: Date,
   ): Promise<void> {
+    if (Number.isNaN(publishedAt.getTime())) {
+      throw new Error("Invalid outbox publishedAt timestamp");
+    }
+
     await this.db.$queryRawUnsafe(
       `
       UPDATE outbox_messages
@@ -113,6 +130,10 @@ export class PostgresOutboxStore<TPayload = unknown>
     error: Error,
     nextAttemptAt: Date,
   ): Promise<void> {
+    if (Number.isNaN(nextAttemptAt.getTime())) {
+      throw new Error("Invalid outbox nextAttemptAt timestamp");
+    }
+
     await this.db.$queryRawUnsafe(
       `
       UPDATE outbox_messages

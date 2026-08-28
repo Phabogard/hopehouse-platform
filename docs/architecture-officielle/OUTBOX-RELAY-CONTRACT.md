@@ -16,7 +16,7 @@ SELECT ...
 FROM outbox_messages
 WHERE published_at IS NULL
   AND available_at <= now()
-ORDER BY created_at, event_id
+ORDER BY created_at, id
 FOR UPDATE SKIP LOCKED
 LIMIT $1;
 ```

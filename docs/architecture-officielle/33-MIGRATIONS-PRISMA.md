@@ -85,6 +85,10 @@ Après cette résolution, les déploiements futurs doivent utiliser `prisma migr
 
 Les dates de persistance doivent utiliser les types temporels PostgreSQL correspondants (`TIMESTAMPTZ(3)`), et les valeurs structurées doivent utiliser `JSONB` lorsque le contrat les définit comme JSON. Les représentations `TEXT` historiques de dates ou JSON ne doivent pas être réintroduites dans une nouvelle migration.
 
+## Tables techniques de fiabilité
+
+Les tables `outbox_messages`, `audit_logs` et `idempotency_records` sont déjà créées par les migrations versionnées. Elles sont toutes représentées dans `prisma/schema.prisma` afin que le modèle Prisma, les migrations et les adaptateurs de persistance décrivent le même contrat. L'ajout du modèle `IdempotencyRecord` ne nécessite pas de nouvelle migration : il décrit la table, la clé primaire composite et l'index `idempotency_records_created_at_idx` déjà créés par `20260820100000_idempotency_records`.
+
 ## Stratégie pour les prochaines migrations
 
 1. Modifier le modèle Prisma et/ou le contrat SQL documentaire.

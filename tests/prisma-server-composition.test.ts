@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { PrismaAuthRuntimeContext } from '../src/infrastructure/prisma/auth-runtime.js';
 import { createPrismaHopeHouseServer } from '../src/infrastructure/prisma/server-composition.js';
@@ -7,6 +8,13 @@ import { createPrismaHopeHouseServer } from '../src/infrastructure/prisma/server
 function hash(value: string): string {
   return createHash('sha256').update(value).digest('hex');
 }
+
+test('production entry point starts the canonical Prisma composition root', () => {
+  const entryPoint = readFileSync('src/server.ts', 'utf8');
+
+  assert.match(entryPoint, /createPrismaHopeHouseServer/);
+  assert.doesNotMatch(entryPoint, /createPrismaCatalogueServer/);
+});
 
 test('createPrismaHopeHouseServer builds a Prisma auth runtime and injects it into the server', async () => {
   const createdWith: unknown[] = [];
@@ -62,11 +70,18 @@ test('createPrismaHopeHouseServer uses the Prisma auth runtime for authenticated
   } as const;
   const sessions = new Map<string, Record<string, unknown>>();
   const calls: string[] = [];
+  const auditEntries: Record<string, unknown>[] = [];
+  const idempotencyCalls: Array<{ readonly sql: string; readonly values: readonly unknown[] }> = [];
 
   class FakePrismaClient {
     async $connect(): Promise<void> { return undefined; }
     async $disconnect(): Promise<void> { return undefined; }
     async $transaction(operation: (transaction: this) => Promise<unknown>): Promise<unknown> { return operation(this); }
+    async $queryRaw<T = unknown>(): Promise<T> { return [] as T; }
+    async $executeRaw(strings: TemplateStringsArray, ...values: readonly unknown[]): Promise<number> {
+      idempotencyCalls.push({ sql: Array.from(strings).join('?'), values });
+      return 1;
+    }
 
     readonly user = {
       findUnique: async (input: { readonly where: { readonly email?: string; readonly id?: string } }) => {
@@ -116,6 +131,30 @@ test('createPrismaHopeHouseServer uses the Prisma auth runtime for authenticated
       findMany: async () => [],
     };
 
+    readonly auditLog = {
+      create: async (input: { readonly data: Record<string, unknown> }) => {
+        auditEntries.push(input.data);
+        return input.data;
+      },
+      findMany: async () => auditEntries,
+    };
+
+    readonly catalog = {
+      findUnique: async (input: { readonly where: { readonly id: string } }) => {
+        calls.push(`catalog:${input.where.id}`);
+        return {
+          id: input.where.id,
+          code: 'CAT-1',
+          name: 'Catalogue principal',
+          type: 'service',
+          status: 'active',
+          metadata: {},
+          createdAt: new Date('2026-01-01T00:00:00.000Z'),
+          updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+        };
+      },
+    };
+
     readonly deviceFingerprint = {
       upsert: async (input: { readonly create: Record<string, unknown> }) => input.create,
       findUnique: async () => null,
@@ -159,6 +198,20 @@ test('createPrismaHopeHouseServer uses the Prisma auth runtime for authenticated
 
     const usersResponse = await fetch(`${baseUrl}/users`, { headers: { authorization: `Bearer ${login.data.accessToken}` } });
     assert.equal(usersResponse.status, 200);
+
+    const auditResponse = await fetch(`${baseUrl}/audit-logs`, { headers: { authorization: `Bearer ${login.data.accessToken}` } });
+    const auditBody = await auditResponse.json() as { data: Array<{ action: string }> };
+    assert.equal(auditResponse.status, 200);
+    assert.equal(auditBody.data.some((entry) => entry.action === 'audit.list'), true);
+
+    const catalogueResponse = await fetch(`${baseUrl}/catalogue/catalogs/cat-1`, { headers: { authorization: `Bearer ${login.data.accessToken}` } });
+    assert.equal(catalogueResponse.status, 200);
+
+    await composition.idempotency.save({
+      key: 'composition:idempotency-1',
+      operation: 'catalogue.read',
+      createdAt: '2026-08-28T00:00:00.000Z',
+    });
   } finally {
     await composition.close();
   }
@@ -167,4 +220,13 @@ test('createPrismaHopeHouseServer uses the Prisma auth runtime for authenticated
   assert.equal(calls.includes('credential:find-active'), true);
   assert.equal(calls.includes(`user:id:${user.id}`), true);
   assert.equal(calls.some((call) => call.startsWith('session:')), true);
+  assert.equal(calls.includes('catalog:cat-1'), true);
+  assert.equal(auditEntries.some((entry) => entry.action === 'audit.list'), true);
+  assert.match(idempotencyCalls[0]?.sql ?? '', /INSERT INTO "idempotency_records"/);
+  assert.deepEqual(idempotencyCalls[0]?.values, [
+    'composition:idempotency-1',
+    'catalogue.read',
+    null,
+    new Date('2026-08-28T00:00:00.000Z'),
+  ]);
 });

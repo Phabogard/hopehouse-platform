@@ -429,3 +429,25 @@ test('database contract aligns durable Audit persistence and Prisma composition'
   assert.equal(composition.includes('new AuditLogService(new PrismaAuditLogRepository(client))'), true);
   assert.equal(service.includes('new InMemoryAuditLogRepository()'), true);
 });
+
+test('database contract aligns durable idempotency persistence with Prisma', () => {
+  const migration = readProjectFile('prisma/migrations/20260820100000_idempotency_records/migration.sql');
+  const prisma = readProjectFile('prisma/schema.prisma');
+  const store = readProjectFile('src/infrastructure/prisma/idempotency-store.ts');
+
+  assert.match(migration, /CREATE TABLE "idempotency_records"[\s\S]*PRIMARY KEY \("key", "operation"\)/);
+  assert.match(migration, /CREATE INDEX "idempotency_records_created_at_idx"[\s\S]*\("created_at"\)/);
+  for (const field of [
+    'model IdempotencyRecord',
+    'key             String',
+    'operation       String',
+    'resultReference String?  @map("result_reference")',
+    'createdAt       DateTime @db.Timestamptz(3) @map("created_at")',
+    '@@id([key, operation])',
+    '@@index([createdAt], map: "idempotency_records_created_at_idx")',
+    '@@map("idempotency_records")',
+  ]) {
+    assert.equal(prisma.includes(field), true, field);
+  }
+  assert.equal(store.includes('ON CONFLICT ("key", "operation") DO NOTHING'), true);
+});

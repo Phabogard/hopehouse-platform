@@ -21,6 +21,10 @@ L'architecture est modulaire, pilotée par configuration et centrée sur le mote
 
 Le code actuel est un MVP in-memory partiel. Les futures évolutions doivent conserver les routes existantes ou les déprécier progressivement, mais les nouvelles capacités métier doivent passer par les composants cibles.
 
+## Composition de production
+
+`src/server.ts` démarre exclusivement `createPrismaHopeHouseServer` depuis `src/infrastructure/prisma/server-composition.ts`. Cette composition root unique crée un seul client Prisma et l'utilise pour l'authentification, `PrismaAuditLogRepository`, `PostgresIdempotencyStore` et `PrismaCatalogRepository`; elle injecte l'audit durable dans le serveur HTTP puis branche les routes Catalogue sur le même runtime d'authentification et la même connexion. `catalogue-server-composition.ts` est conservé uniquement comme alias de compatibilité vers cette composition canonique, et ne doit plus devenir une deuxième composition root.
+
 ## Technologies
 
 Node.js, TypeScript, PostgreSQL, REST API, OpenAPI, WebSocket, Firebase Cloud Messaging, Docker, GitHub, Vitest et bibliothèques QR Code open source sont les références privilégiées.
@@ -37,4 +41,3 @@ Ce document appartient au corpus officiel Hope House Platform. Il est obligatoir
 - Les rôles et permissions sont configurables et vérifiés côté serveur.
 - Les connecteurs sont indépendants de la logique métier.
 - Les actions sensibles produisent historique et audit immuables.
-
