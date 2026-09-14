@@ -231,10 +231,21 @@ export class PrismaWalletRepository {
     });
   }
 
-  async credit(params: CreditWalletParams): Promise<WalletTransactionDto> {
-    const amountBigInt = toSafeBigIntCents(params.amountCents);
-    const currency = validateCurrency(params.currency);
+  async getTransactionById(transactionId: string): Promise<WalletTransactionDto | null> {
+    const transaction = await this.prisma.walletTransaction.findUnique({
+      where: { id: transactionId },
+    });
+    return transaction === null ? null : this.mapTransaction(transaction);
+  }
 
+  async findTransactionByKey(walletId: string, transactionKey: string): Promise<WalletTransactionDto | null> {
+    const transaction = await this.prisma.walletTransaction.findFirst({
+      where: { walletId, transactionKey },
+    });
+    return transaction === null ? null : this.mapTransaction(transaction);
+  }
+
+  async credit(params: CreditWalletParams): Promise<WalletTransactionDto> {
     // Fast-path read check before starting transaction
     if (params.transactionKey) {
       const existingTx = await this.prisma.walletTransaction.findFirst({
@@ -246,52 +257,7 @@ export class PrismaWalletRepository {
     }
 
     try {
-      return await this.prisma.$transaction(async (tx) => {
-        // 1. Idempotence Check inside transaction
-        if (params.transactionKey) {
-          const existingTx = await tx.walletTransaction.findFirst({
-            where: { walletId: params.walletId, transactionKey: params.transactionKey },
-          });
-          if (existingTx) {
-            return this.mapTransaction(existingTx);
-          }
-        }
-
-        // 2. Lock / Upsert Balance
-        await tx.walletBalance.upsert({
-          where: {
-            walletId_currency: { walletId: params.walletId, currency },
-          },
-          create: {
-            walletId: params.walletId,
-            currency,
-            availableCents: amountBigInt,
-            reservedCents: 0n,
-          },
-          update: {
-            availableCents: { increment: amountBigInt },
-          },
-        });
-
-        // 3. Create Transaction
-        const transaction = await tx.walletTransaction.create({
-          data: {
-            id: params.transactionId,
-            walletId: params.walletId,
-            currency,
-            amountCents: amountBigInt,
-            type: WalletTransactionType.CREDIT,
-            status: WalletTransactionStatus.SETTLED,
-            actorId: params.actorId,
-            transactionKey: params.transactionKey ?? null,
-            relatedEntityType: params.relatedEntityType ?? null,
-            relatedEntityId: params.relatedEntityId ?? null,
-            metadataJson: (params.metadata ?? {}) as Prisma.InputJsonValue,
-          },
-        });
-
-        return this.mapTransaction(transaction);
-      });
+      return await this.prisma.$transaction((tx) => this.creditWithinTransaction(tx, params));
     } catch (err: any) {
       if (params.transactionKey && isTransactionKeyUniqueViolation(err)) {
         const winnerTx = await this.prisma.walletTransaction.findFirst({
@@ -303,6 +269,70 @@ export class PrismaWalletRepository {
       }
       throw err;
     }
+  }
+
+  /**
+   * Performs the credit mutation (balance upsert + WalletTransaction insert)
+   * using a Prisma client already inside a transaction owned by the caller
+   * (e.g. an application-layer use case combining Wallet + Idempotency +
+   * Outbox writes in a single PostgreSQL transaction).
+   *
+   * This method never opens or commits a transaction itself — that is the
+   * caller's responsibility. It does perform the same idempotence check on
+   * `transactionKey` as `credit()`, so it is safe to call directly.
+   */
+  async creditWithinTransaction(
+    tx: Prisma.TransactionClient,
+    params: CreditWalletParams,
+  ): Promise<WalletTransactionDto> {
+    const amountBigInt = toSafeBigIntCents(params.amountCents);
+    const currency = validateCurrency(params.currency);
+
+    // 1. Idempotence Check (wallet-level transactionKey, distinct from the
+    //    command-level Idempotency-Key handled by the caller, if any).
+    if (params.transactionKey) {
+      const existingTx = await tx.walletTransaction.findFirst({
+        where: { walletId: params.walletId, transactionKey: params.transactionKey },
+      });
+      if (existingTx) {
+        return this.mapTransaction(existingTx);
+      }
+    }
+
+    // 2. Lock / Upsert Balance
+    await tx.walletBalance.upsert({
+      where: {
+        walletId_currency: { walletId: params.walletId, currency },
+      },
+      create: {
+        walletId: params.walletId,
+        currency,
+        availableCents: amountBigInt,
+        reservedCents: 0n,
+      },
+      update: {
+        availableCents: { increment: amountBigInt },
+      },
+    });
+
+    // 3. Create Transaction
+    const transaction = await tx.walletTransaction.create({
+      data: {
+        id: params.transactionId,
+        walletId: params.walletId,
+        currency,
+        amountCents: amountBigInt,
+        type: WalletTransactionType.CREDIT,
+        status: WalletTransactionStatus.SETTLED,
+        actorId: params.actorId,
+        transactionKey: params.transactionKey ?? null,
+        relatedEntityType: params.relatedEntityType ?? null,
+        relatedEntityId: params.relatedEntityId ?? null,
+        metadataJson: (params.metadata ?? {}) as Prisma.InputJsonValue,
+      },
+    });
+
+    return this.mapTransaction(transaction);
   }
 
   async debit(params: DebitWalletParams): Promise<WalletTransactionDto> {

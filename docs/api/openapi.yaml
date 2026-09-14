@@ -13,9 +13,9 @@ x-targetArchitecture:
     - Connecteurs indépendants de la logique métier.
   implementedResources:
     - /orders
+    - /wallets/{walletId}/credit
   futureDocumentaryResources:
     - /catalogs
-    - /wallets
     - /notifications
     - /receipts
     - /connectors
@@ -77,6 +77,62 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/OrderResponse'
+  /wallets/{walletId}/credit:
+    post:
+      summary: Crédite un wallet de manière idempotente.
+      description: >-
+        Effectue le crédit dans une transaction PostgreSQL unique couvrant
+        l'IdempotencyRecord, la mutation Wallet, le WalletTransaction et
+        l'événement Outbox. Un rejeu avec le même en-tête Idempotency-Key
+        renvoie le résultat déjà obtenu (statut 200) sans créditer à nouveau
+        ni réémettre d'événement Outbox ; une première exécution renvoie 201.
+        Le transactionKey métier (optionnel) n'est jamais dérivé de
+        l'Idempotency-Key : deux Idempotency-Key différentes partageant le
+        même transactionKey déclenchent une erreur 409 déterministe plutôt
+        qu'un rejeu silencieux.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: walletId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: Idempotence de la commande (distincte du transactionKey métier Wallet, voir schéma).
+          schema:
+            type: string
+            minLength: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreditWalletRequest'
+      responses:
+        '201':
+          description: Wallet crédité (première exécution).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WalletTransactionResponse'
+        '200':
+          description: Résultat d'une exécution précédente, renvoyé à l'identique (rejeu idempotent).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WalletTransactionResponse'
+        '409':
+          description: >-
+            transactionKey déjà utilisé par une commande différente
+            (Idempotency-Key différente) sur ce wallet. Aucune mutation
+            n'est appliquée dans ce cas.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /users:
     get:
       summary: Liste les utilisateurs.
@@ -951,6 +1007,84 @@ components:
           type:
             - string
             - 'null'
+
+    CreditWalletRequest:
+      type: object
+      required:
+        - currency
+        - amountCents
+      properties:
+        currency:
+          type: string
+          minLength: 3
+          maxLength: 3
+          description: Code devise ISO 4217 (3 lettres majuscules).
+        amountCents:
+          type: integer
+          minimum: 1
+          description: Montant en cents, entier strictement positif.
+        transactionKey:
+          type: string
+          minLength: 1
+          description: >-
+            Clé d'unicité métier du mouvement Wallet (distincte de
+            l'en-tête Idempotency-Key). Optionnelle : si absente,
+            transaction_key vaut NULL en base — elle n'est jamais dérivée
+            de l'Idempotency-Key.
+        relatedEntityType:
+          type: string
+          minLength: 1
+        relatedEntityId:
+          type: string
+          minLength: 1
+        metadata:
+          type: object
+    WalletTransactionResponse:
+      type: object
+      required:
+        - data
+      properties:
+        data:
+          type: object
+          required:
+            - id
+            - walletId
+            - currency
+            - amountCents
+            - type
+            - status
+            - actorId
+            - occurredAt
+          properties:
+            id:
+              type: string
+            walletId:
+              type: string
+            currency:
+              type: string
+            amountCents:
+              type: integer
+            type:
+              type: string
+            status:
+              type: string
+            actorId:
+              type: string
+            transactionKey:
+              type:
+                - string
+                - 'null'
+            relatedEntityType:
+              type:
+                - string
+                - 'null'
+            relatedEntityId:
+              type:
+                - string
+                - 'null'
+            occurredAt:
+              type: string
+              format: date-time
 
     OrderStep:
       type: string

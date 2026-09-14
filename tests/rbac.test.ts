@@ -5,10 +5,10 @@ import { authorize, can } from '../src/modules/rbac/authorize.js';
 import { historicalTransitionalRoles, officialBusinessRoleByTechnicalRole, permissions, rolePermissions, type Permission, type Role } from '../src/modules/rbac/permissions.js';
 
 const expectedRolePermissions: Record<Role, readonly Permission[]> = {
-  system_admin: ['users:read', 'users:manage', 'roles:manage', 'beneficiaries:read', 'services:read', 'subscriptions:read', 'payments:read', 'invoices:read', 'audit:read', 'catalogue:read', 'catalogue:manage', 'catalogue:activate', 'catalogue:archive', 'catalogue:price:manage', 'catalogue:commission:manage', 'catalogue:service:manage'],
+  system_admin: ['users:read', 'users:manage', 'roles:manage', 'beneficiaries:read', 'services:read', 'subscriptions:read', 'payments:read', 'invoices:read', 'audit:read', 'catalogue:read', 'catalogue:manage', 'catalogue:activate', 'catalogue:archive', 'catalogue:price:manage', 'catalogue:commission:manage', 'catalogue:service:manage', 'wallets:credit'],
   business_admin: ['users:read', 'beneficiaries:read', 'beneficiaries:manage', 'services:read', 'services:manage', 'subscriptions:read', 'subscriptions:manage', 'payments:read', 'payments:create', 'invoices:read', 'catalogue:read', 'catalogue:manage', 'catalogue:activate', 'catalogue:archive', 'catalogue:price:manage', 'catalogue:commission:manage', 'catalogue:service:manage'],
   operations_agent: ['beneficiaries:read', 'beneficiaries:manage', 'services:read', 'subscriptions:read', 'subscriptions:manage', 'payments:read', 'payments:create', 'invoices:read', 'catalogue:read'],
-  finance_manager: ['beneficiaries:read', 'services:read', 'subscriptions:read', 'payments:read', 'payments:create', 'payments:validate', 'invoices:read', 'invoices:manage', 'accounting:export'],
+  finance_manager: ['beneficiaries:read', 'services:read', 'subscriptions:read', 'payments:read', 'payments:create', 'payments:validate', 'invoices:read', 'invoices:manage', 'accounting:export', 'wallets:credit'],
   client: [],
   accountant: ['payments:read', 'invoices:read', 'accounting:export'],
   auditor: ['audit:read'],

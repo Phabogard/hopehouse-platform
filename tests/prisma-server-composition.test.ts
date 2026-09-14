@@ -77,9 +77,11 @@ test('createPrismaHopeHouseServer uses the Prisma auth runtime for authenticated
     async $connect(): Promise<void> { return undefined; }
     async $disconnect(): Promise<void> { return undefined; }
     async $transaction(operation: (transaction: this) => Promise<unknown>): Promise<unknown> { return operation(this); }
-    async $queryRaw<T = unknown>(): Promise<T> { return [] as T; }
-    async $executeRaw(strings: TemplateStringsArray, ...values: readonly unknown[]): Promise<number> {
+    async $queryRaw<T = unknown>(strings: TemplateStringsArray, ...values: readonly unknown[]): Promise<T> {
       idempotencyCalls.push({ sql: Array.from(strings).join('?'), values });
+      return [{ key: 'composition:idempotency-1' }] as T;
+    }
+    async $executeRaw(strings: TemplateStringsArray, ...values: readonly unknown[]): Promise<number> {
       return 1;
     }
 
