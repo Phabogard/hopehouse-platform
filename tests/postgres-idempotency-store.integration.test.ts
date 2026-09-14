@@ -17,7 +17,7 @@ test('postgres idempotency store enforces duplicate safety under concurrent writ
     const storeA = new PostgresIdempotencyStore(clientA);
     const storeB = new PostgresIdempotencyStore(clientB);
 
-    await Promise.all([
+    const [wonA, wonB] = await Promise.all([
       storeA.save({
         key,
         operation,
@@ -31,6 +31,9 @@ test('postgres idempotency store enforces duplicate safety under concurrent writ
         createdAt: '2026-08-20T10:00:01.000Z',
       }),
     ]);
+
+    assert.equal([wonA, wonB].filter((v) => v === true).length, 1, 'exactement un des deux appels concurrents doit gagner (save() === true)');
+    assert.equal([wonA, wonB].filter((v) => v === false).length, 1, "l'autre doit perdre (save() === false)");
 
     const rows = await clientA.$queryRaw<Array<{ result_reference: string | null }>>`
       SELECT "result_reference"

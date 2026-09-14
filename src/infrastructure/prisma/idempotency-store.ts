@@ -10,7 +10,6 @@ type PrismaIdempotencyRow = {
 
 export interface PrismaIdempotencyClient {
   $queryRaw<T = unknown>(query: TemplateStringsArray, ...values: readonly unknown[]): Promise<T>;
-  $executeRaw(query: TemplateStringsArray, ...values: readonly unknown[]): Promise<number>;
 }
 
 function toDomain(row: PrismaIdempotencyRow): IdempotencyRecord {
@@ -37,13 +36,16 @@ export class PostgresIdempotencyStore implements IdempotencyStore {
     return row === undefined ? null : toDomain(row);
   }
 
-  async save(record: IdempotencyRecord): Promise<void> {
+  async save(record: IdempotencyRecord): Promise<boolean> {
     const createdAt = parseDomainDate(record.createdAt, 'idempotency record creation');
 
-    await this.client.$executeRaw`
+    const inserted = await this.client.$queryRaw<readonly { key: string }[]>`
       INSERT INTO "idempotency_records" ("key", "operation", "result_reference", "created_at")
       VALUES (${record.key}, ${record.operation}, ${record.resultReference ?? null}, ${createdAt})
       ON CONFLICT ("key", "operation") DO NOTHING
+      RETURNING "key"
     `;
+
+    return inserted.length > 0;
   }
 }

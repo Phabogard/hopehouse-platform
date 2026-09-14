@@ -22,6 +22,7 @@ export const permissions = [
   'catalogue:price:manage',
   'catalogue:commission:manage',
   'catalogue:service:manage',
+  'wallets:credit',
 ] as const;
 
 export type Permission = (typeof permissions)[number];
@@ -70,6 +71,7 @@ export const rolePermissions: Record<Role, readonly Permission[]> = {
     'payments:read', 'invoices:read', 'audit:read',
     'catalogue:read', 'catalogue:manage', 'catalogue:activate', 'catalogue:archive',
     'catalogue:price:manage', 'catalogue:commission:manage', 'catalogue:service:manage',
+    'wallets:credit',
   ],
   business_admin: [
     'users:read', 'beneficiaries:read', 'beneficiaries:manage', 'services:read', 'services:manage',
@@ -81,7 +83,7 @@ export const rolePermissions: Record<Role, readonly Permission[]> = {
     'beneficiaries:read', 'beneficiaries:manage', 'services:read', 'subscriptions:read', 'subscriptions:manage',
     'payments:read', 'payments:create', 'invoices:read', 'catalogue:read',
   ],
-  finance_manager: ['beneficiaries:read', 'services:read', 'subscriptions:read', 'payments:read', 'payments:create', 'payments:validate', 'invoices:read', 'invoices:manage', 'accounting:export'],
+  finance_manager: ['beneficiaries:read', 'services:read', 'subscriptions:read', 'payments:read', 'payments:create', 'payments:validate', 'invoices:read', 'invoices:manage', 'accounting:export', 'wallets:credit'],
   client: [],
   accountant: ['payments:read', 'invoices:read', 'accounting:export'],
   auditor: ['audit:read'],

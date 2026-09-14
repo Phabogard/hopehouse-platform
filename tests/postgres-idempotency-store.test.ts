@@ -16,9 +16,6 @@ test('postgres idempotency store maps persisted records', async () => {
         },
       ] as T;
     },
-    async $executeRaw() {
-      return 1;
-    },
   };
 
   const store = new PostgresIdempotencyStore(client);
@@ -34,28 +31,27 @@ test('postgres idempotency store maps persisted records', async () => {
   assert.deepEqual(calls[0]?.values, ['stripe:event-1', 'payment.webhook']);
 });
 
-test('postgres idempotency store persists records with an atomic duplicate-safe insert', async () => {
+test('postgres idempotency store save() returns true when it actually inserted the row', async () => {
   const calls: Array<{ readonly sql: string; readonly values: readonly unknown[] }> = [];
   const client: PrismaIdempotencyClient = {
-    async $queryRaw<T = unknown>(): Promise<T> {
-      return [] as T;
-    },
-    async $executeRaw(strings: TemplateStringsArray, ...values: readonly unknown[]) {
+    async $queryRaw<T = unknown>(strings: TemplateStringsArray, ...values: readonly unknown[]): Promise<T> {
       calls.push({ sql: Array.from(strings).join('?'), values });
-      return 1;
+      return [{ key: 'stripe:event-1' }] as T; // RETURNING produced a row: this call won
     },
   };
 
   const store = new PostgresIdempotencyStore(client);
-  await store.save({
+  const won = await store.save({
     key: 'stripe:event-1',
     operation: 'payment.webhook',
     resultReference: 'payment-1',
     createdAt: '2026-08-20T10:00:00.000Z',
   });
 
+  assert.equal(won, true);
   assert.match(calls[0]?.sql ?? '', /INSERT INTO/);
   assert.match(calls[0]?.sql ?? '', /ON CONFLICT \("key", "operation"\) DO NOTHING/);
+  assert.match(calls[0]?.sql ?? '', /RETURNING "key"/);
   assert.deepEqual(calls[0]?.values, [
     'stripe:event-1',
     'payment.webhook',
@@ -64,15 +60,30 @@ test('postgres idempotency store persists records with an atomic duplicate-safe 
   ]);
 });
 
+test('postgres idempotency store save() returns false when a record already existed (no row returned)', async () => {
+  const client: PrismaIdempotencyClient = {
+    async $queryRaw<T = unknown>(): Promise<T> {
+      return [] as T; // ON CONFLICT DO NOTHING: no row returned, this call lost
+    },
+  };
+
+  const store = new PostgresIdempotencyStore(client);
+  const won = await store.save({
+    key: 'stripe:event-1',
+    operation: 'payment.webhook',
+    resultReference: 'payment-1',
+    createdAt: '2026-08-20T10:00:00.000Z',
+  });
+
+  assert.equal(won, false);
+});
+
 test('postgres idempotency store rejects invalid creation timestamps before writing', async () => {
   let queryCount = 0;
   const client: PrismaIdempotencyClient = {
     async $queryRaw<T = unknown>(): Promise<T> {
-      return [] as T;
-    },
-    async $executeRaw() {
       queryCount += 1;
-      return 0;
+      return [] as T;
     },
   };
 
