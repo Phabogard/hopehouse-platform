@@ -537,6 +537,8 @@ test('wallet credit: deux crédits indépendants concurrents (idempotencyKey et 
   let clientA: PrismaClient | undefined;
   let clientB: PrismaClient | undefined;
   let creditsPromise: Promise<[any, any]> | undefined;
+  let lockTxPromise: Promise<unknown> | undefined;
+  let releaseLock: (() => void) | undefined;
 
   try {
     await createTestWallet(client, walletId);
@@ -552,16 +554,23 @@ test('wallet credit: deux crédits indépendants concurrents (idempotencyKey et 
     const lockAcquired = new Promise<number>((resolve) => {
       resolveLockAcquired = resolve;
     });
-    let releaseLock!: () => void;
+    let lockReleased = false;
+    let releaseLockFn!: () => void;
     const releaseLockRequested = new Promise<void>((resolve) => {
-      releaseLock = resolve;
+      releaseLockFn = resolve;
     });
+    releaseLock = () => {
+      if (!lockReleased) {
+        lockReleased = true;
+        releaseLockFn();
+      }
+    };
 
     // Verrou explicite tenu par une transaction interactive dédiée, séparée
     // des deux connexions qui exécuteront les crédits. Le pid est capturé
     // DANS cette même transaction pour garantir qu'il correspond bien à la
     // connexion physique qui détient réellement le verrou de ligne.
-    const lockTxPromise = lockClient.$transaction(
+    lockTxPromise = lockClient.$transaction(
       async (ltx) => {
         const pidRows = await ltx.$queryRaw<Array<{ pid: number }>>`SELECT pg_backend_pid() AS pid`;
         const pid = pidRows[0]!.pid;
@@ -679,6 +688,12 @@ test('wallet credit: deux crédits indépendants concurrents (idempotencyKey et 
     `;
     assert.equal(idempotencyRows.length, 2, 'chaque tentative réussie doit avoir son propre IdempotencyRecord');
   } finally {
+    if (releaseLock) {
+      releaseLock();
+    }
+    if (lockTxPromise) {
+      await lockTxPromise.catch(() => {});
+    }
     if (creditsPromise) {
       await creditsPromise.catch(() => {});
     }
