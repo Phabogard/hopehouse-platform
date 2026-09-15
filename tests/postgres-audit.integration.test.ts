@@ -165,10 +165,12 @@ test('postgres audit repository: tri déterministe par occurredAt desc et id des
   const repo = new PostgresAuditLogRepository(client);
   const entityId = `entity-sort-${randomUUID()}`;
   const sameTime = new Date('2026-09-10T10:00:00.000Z').toISOString();
+  const id1 = `audit-sort-1-${randomUUID()}`;
+  const id2 = `audit-sort-2-${randomUUID()}`;
 
   try {
     await repo.record({
-      id: 'id-001',
+      id: id1,
       actorUserId: 'actor-1',
       action: 'order.step',
       entityType: 'order',
@@ -178,7 +180,7 @@ test('postgres audit repository: tri déterministe par occurredAt desc et id des
     });
 
     await repo.record({
-      id: 'id-002',
+      id: id2,
       actorUserId: 'actor-1',
       action: 'order.step',
       entityType: 'order',
@@ -189,9 +191,12 @@ test('postgres audit repository: tri déterministe par occurredAt desc et id des
 
     const results = await repo.list({ entityId });
     assert.equal(results.length, 2);
-    assert.equal(results[0]?.id, 'id-002'); // id desc
-    assert.equal(results[1]?.id, 'id-001');
+    const expectedFirst = id1 > id2 ? id1 : id2;
+    const expectedSecond = id1 > id2 ? id2 : id1;
+    assert.equal(results[0]?.id, expectedFirst); // id desc
+    assert.equal(results[1]?.id, expectedSecond);
   } finally {
+    await client.auditLog.deleteMany({ where: { entityId } });
     await client.$disconnect();
   }
 });
