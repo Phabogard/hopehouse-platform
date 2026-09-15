@@ -6,6 +6,7 @@ import { createBeneficiary } from './modules/beneficiaries/beneficiaries.js';
 import { createInvoice } from './modules/invoices/invoices.js';
 import { createPayment } from './modules/payments/payments.js';
 import { OrderEngine, orderCycle, type Order, type OrderMode, type OrderStep } from './modules/orders/index.js';
+import type { OrderRepository } from './modules/orders/order-repository.js';
 import { authorize, type Actor } from './modules/rbac/authorize.js';
 import { createServiceOffering } from './modules/services/services.js';
 import { createSubscription } from './modules/subscriptions/subscriptions.js';
@@ -43,6 +44,8 @@ export interface HopeHouseServerOptions {
   readonly authRuntime?: AuthRuntime | null;
   readonly aiClient?: AiChatProvider;
   readonly audit?: AuditLogService;
+  readonly orderRepository?: OrderRepository;
+  readonly orderEngine?: OrderEngine;
   readonly publicDir?: string;
 }
 
@@ -189,6 +192,8 @@ export function createHopeHouseServer(options: HopeHouseServerOptions = {}) {
     : options.auth === undefined && process.env.HOPEHOUSE_JWT_SECRET === undefined ? null : new AuthRuntimeContext(options.auth);
   const aiClient = options.aiClient ?? new OpenAiResponsesClient();
   const audit = options.audit ?? new AuditLogService();
+  const orderRepository = options.orderRepository;
+  const orderEngine = options.orderEngine ?? new OrderEngine({}, orderRepository);
   const publicDir = options.publicDir ?? join(process.cwd(), 'public');
 
   return createServer(async (request: IncomingMessage, response: ServerResponse) => {
@@ -251,16 +256,22 @@ export function createHopeHouseServer(options: HopeHouseServerOptions = {}) {
         const currentActor = requireAuthenticatedActor(actor);
         const body = await readJsonBody(request);
         const monetaryIntent = optionalObjectField(body, 'monetaryIntent');
-        const order = orderEngine.create({
+        const orderInput = {
           requesterActorId: currentActor.id,
           serviceDefinitionId: stringField(body, 'serviceDefinitionId'),
+          catalogItemId: optionalStringField(body, 'catalogItemId'),
           mode: orderModeField(body, 'mode'),
           beneficiaryId: optionalStringField(body, 'beneficiaryId'),
           channel: optionalStringField(body, 'channel'),
           monetaryIntent: monetaryIntent === null ? null : { amountCents: integerField(monetaryIntent, 'amountCents'), currency: stringField(monetaryIntent, 'currency') },
           metadata: optionalObjectField(body, 'metadata') ?? undefined,
-        });
-        orders.set(order.id, order);
+        };
+        const order = orderRepository
+          ? await orderEngine.createPersisted(orderInput)
+          : orderEngine.create(orderInput);
+        if (!orderRepository) {
+          orders.set(order.id, order);
+        }
         await audit.record({ actorUserId: currentActor.id, action: 'order.create', entityType: 'order', entityId: order.id, outcome: 'success' });
         sendJson(response, 201, { data: order });
         return;
@@ -269,16 +280,20 @@ export function createHopeHouseServer(options: HopeHouseServerOptions = {}) {
       if (request.method === 'POST' && url.pathname.match(/^\/orders\/[^/]+\/transitions$/) !== null) {
         const currentActor = requireAuthenticatedActor(actor);
         const orderId = url.pathname.split('/')[2];
-        const order = orders.get(orderId);
-        if (order === undefined) throw new ValidationError('Commande introuvable');
+        const existingOrder = orderRepository
+          ? await orderRepository.getById(orderId)
+          : orders.get(orderId);
+        if (!existingOrder) throw new ValidationError('Commande introuvable');
         const body = await readJsonBody(request);
         const advancedOrder = await orderEngine.advance({
-          order,
+          order: existingOrder,
           actorId: currentActor.id,
           toStep: orderStepField(body, 'toStep'),
           metadata: optionalObjectField(body, 'metadata') ?? undefined,
         });
-        orders.set(advancedOrder.id, advancedOrder);
+        if (!orderRepository) {
+          orders.set(advancedOrder.id, advancedOrder);
+        }
         await audit.record({ actorUserId: currentActor.id, action: 'order.transition', entityType: 'order', entityId: advancedOrder.id, outcome: 'success', metadata: { toStep: advancedOrder.currentStep } });
         sendJson(response, 200, { data: advancedOrder });
         return;

@@ -13,6 +13,7 @@ export interface OrderActorRef {
 
 export interface OrderConfigurationRef {
   serviceDefinitionId: string;
+  catalogItemId?: string | null;
   mode: OrderMode;
 }
 
@@ -50,6 +51,7 @@ export interface Order {
 export interface CreateOrderInput {
   requesterActorId: string;
   serviceDefinitionId: string;
+  catalogItemId?: string | null;
   mode: OrderMode;
   beneficiaryId?: string | null;
   channel?: string | null;
@@ -86,8 +88,8 @@ function validateMode(mode: OrderMode): OrderMode {
 
 function validateMonetaryIntent(input: OrderMonetaryIntent | null | undefined): OrderMonetaryIntent | null {
   if (input === undefined || input === null) return null;
-  if (!Number.isInteger(input.amountCents) || input.amountCents < 0) {
-    throw new ValidationError('Le montant de commande doit être un entier positif ou nul');
+  if (!Number.isSafeInteger(input.amountCents) || input.amountCents < 0) {
+    throw new ValidationError('Le montant de commande doit être un entier positif ou nul et sûrement représentable');
   }
   if (input.currency.trim().length !== 3) {
     throw new ValidationError('La devise de commande doit utiliser un code à trois caractères');
@@ -142,6 +144,7 @@ export function createOrder(input: CreateOrderInput): Order {
     currentStep: 'creation',
     configuration: {
       serviceDefinitionId: requireNonBlank(input.serviceDefinitionId, 'serviceDefinitionId'),
+      catalogItemId: normalizeOptionalString(input.catalogItemId),
       mode: validateMode(input.mode),
     },
     requester: { id: requesterActorId },

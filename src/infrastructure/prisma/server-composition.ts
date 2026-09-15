@@ -14,6 +14,8 @@ import { PrismaCatalogRepository } from './catalogue-repository.js';
 import { createPrismaClient, type CreatePrismaClientOptions } from './client.js';
 import { PostgresIdempotencyStore } from './idempotency-store.js';
 import { PostgresOutboxStore } from '../outbox/postgres-outbox-store.js';
+import { PrismaOrderRepository } from './order-repository.js';
+import { OrderEngine } from '../../modules/orders/order-engine.js';
 
 type PrismaHopeHouseClient = PrismaClient & PrismaAuthRuntimeClient;
 
@@ -30,6 +32,8 @@ export interface PrismaHopeHouseServerComposition {
   readonly catalogue: CatalogueService;
   readonly idempotency: PostgresIdempotencyStore;
   readonly wallet: WalletApiService;
+  readonly orderRepository: PrismaOrderRepository;
+  readonly orderEngine: OrderEngine;
   close(): Promise<void>;
 }
 
@@ -59,7 +63,9 @@ export async function createPrismaHopeHouseServer(options: PrismaHopeHouseServer
     createOutboxStore: (tx: Prisma.TransactionClient) => new PostgresOutboxStore(tx),
   });
   const wallet = walletApiServiceFromUseCase(creditWalletUseCase);
-  const baseServer = createHopeHouseServer({ authRuntime, audit });
+  const orderRepository = new PrismaOrderRepository(client);
+  const orderEngine = new OrderEngine({}, orderRepository);
+  const baseServer = createHopeHouseServer({ authRuntime, audit, orderRepository, orderEngine });
   const server = createServer((request, response) => {
     const pathname = new URL(request.url ?? '/', 'http://localhost').pathname;
     if (pathname.startsWith('/catalogue/')) {
@@ -86,6 +92,8 @@ export async function createPrismaHopeHouseServer(options: PrismaHopeHouseServer
     catalogue,
     idempotency,
     wallet,
+    orderRepository,
+    orderEngine,
     async close(): Promise<void> {
       await new Promise<void>((resolve) => server.close(() => resolve()));
       await new Promise<void>((resolve) => baseServer.close(() => resolve()));
