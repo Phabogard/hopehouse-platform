@@ -8,12 +8,14 @@ import { CreditWalletUseCase } from '../../modules/wallets/credit-wallet-use-cas
 import { PrismaWalletRepository } from '../../modules/wallets/prisma-wallet-repository.js';
 import { handleWalletHttp } from '../../modules/wallets/wallet-http.js';
 import { walletApiServiceFromUseCase, type WalletApiService } from '../../modules/wallets/wallet-api.js';
-import { PrismaAuditLogRepository } from './audit-log-repository.js';
+import { PrismaAuditLogRepository, PostgresAuditLogRepository } from './audit-log-repository.js';
 import { PrismaAuthRuntimeContext, resolvePrismaAuthSecurityPolicy, type PrismaAuthRuntimeClient, type PrismaAuthRuntimeOptions } from './auth-runtime.js';
 import { PrismaCatalogRepository } from './catalogue-repository.js';
 import { createPrismaClient, type CreatePrismaClientOptions } from './client.js';
 import { PostgresIdempotencyStore } from './idempotency-store.js';
 import { PostgresOutboxStore } from '../outbox/postgres-outbox-store.js';
+import { PrismaOrderRepository } from './order-repository.js';
+import { OrderEngine } from '../../modules/orders/order-engine.js';
 
 type PrismaHopeHouseClient = PrismaClient & PrismaAuthRuntimeClient;
 
@@ -27,9 +29,12 @@ export interface PrismaHopeHouseServerComposition {
   readonly server: Server;
   readonly authRuntime: PrismaAuthRuntimeContext;
   readonly audit: AuditLogService;
+  readonly auditRepository: PostgresAuditLogRepository;
   readonly catalogue: CatalogueService;
   readonly idempotency: PostgresIdempotencyStore;
   readonly wallet: WalletApiService;
+  readonly orderRepository: PrismaOrderRepository;
+  readonly orderEngine: OrderEngine;
   close(): Promise<void>;
 }
 
@@ -47,6 +52,7 @@ export async function createPrismaHopeHouseServer(options: PrismaHopeHouseServer
   });
   const policy = await resolvePrismaAuthSecurityPolicy(client, authOptions.policy);
   const authRuntime = new PrismaAuthRuntimeContext(client, { ...authOptions, policy });
+  const auditRepository = new PrismaAuditLogRepository(client);
   const audit = new AuditLogService(new PrismaAuditLogRepository(client));
   const catalogue = new CatalogueService(new PrismaCatalogRepository(client));
   const idempotency = new PostgresIdempotencyStore(client);
@@ -59,7 +65,9 @@ export async function createPrismaHopeHouseServer(options: PrismaHopeHouseServer
     createOutboxStore: (tx: Prisma.TransactionClient) => new PostgresOutboxStore(tx),
   });
   const wallet = walletApiServiceFromUseCase(creditWalletUseCase);
-  const baseServer = createHopeHouseServer({ authRuntime, audit });
+  const orderRepository = new PrismaOrderRepository(client, auditRepository);
+  const orderEngine = new OrderEngine({}, orderRepository, audit);
+  const baseServer = createHopeHouseServer({ authRuntime, audit, orderRepository, orderEngine });
   const server = createServer((request, response) => {
     const pathname = new URL(request.url ?? '/', 'http://localhost').pathname;
     if (pathname.startsWith('/catalogue/')) {
@@ -83,9 +91,12 @@ export async function createPrismaHopeHouseServer(options: PrismaHopeHouseServer
     server,
     authRuntime,
     audit,
+    auditRepository,
     catalogue,
     idempotency,
     wallet,
+    orderRepository,
+    orderEngine,
     async close(): Promise<void> {
       await new Promise<void>((resolve) => server.close(() => resolve()));
       await new Promise<void>((resolve) => baseServer.close(() => resolve()));

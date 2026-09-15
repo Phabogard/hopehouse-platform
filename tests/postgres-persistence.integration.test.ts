@@ -17,10 +17,10 @@ test('postgres audit repository persists and reloads AuditLogService entries', {
   let entryId: string | undefined;
   const audit = new AuditLogService(new PrismaAuditLogRepository({
     auditLog: {
-      create: async ({ data }) => client.auditLog.create({
+      create: async ({ data }: { data: any }) => client.auditLog.create({
         data: { ...data, metadata: data.metadata as Prisma.InputJsonValue },
       }).then((record) => ({ ...record, outcome: record.outcome as 'success' | 'failure' })),
-      findMany: async ({ orderBy }) => (await client.auditLog.findMany({ orderBy }))
+      findMany: async ({ orderBy }: { orderBy: any }) => (await client.auditLog.findMany({ orderBy }))
         .map((record) => ({ ...record, outcome: record.outcome as 'success' | 'failure' })),
     },
   }));

@@ -1,5 +1,6 @@
-import type { AuditLogRepository, AuditLogRecordInput } from '../../modules/audit/audit-log.js';
-import type { AuditLog } from '../../core/types.js';
+import type { Prisma, PrismaClient } from '@prisma/client';
+import type { AuditLogRepository, AuditLogRecordInput, AuditLogQueryFilters } from '../../modules/audit/audit-log.js';
+import type { AuditLog, AuditOutcome } from '../../core/types.js';
 import { parseDomainDate, toDomainIso, toReadonlyJsonObject } from './mappers.js';
 
 type PrismaAuditLogRecord = {
@@ -8,25 +9,22 @@ type PrismaAuditLogRecord = {
   readonly action: string;
   readonly entityType: string;
   readonly entityId: string;
-  readonly outcome: AuditLog['outcome'];
+  readonly outcome: string;
   readonly occurredAt: Date | string;
   readonly metadata: unknown;
 };
 
-type PrismaAuditLogCreateInput = {
-  readonly id: string;
-  readonly actorUserId: string | null;
-  readonly action: string;
-  readonly entityType: string;
-  readonly entityId: string;
-  readonly outcome: AuditLog['outcome'];
-  readonly occurredAt: Date;
-  readonly metadata: Readonly<Record<string, unknown>>;
-};
+export interface PrismaAuditLogWhereInput {
+  actorUserId?: string | null;
+  entityType?: string;
+  entityId?: string;
+  action?: string;
+  outcome?: string;
+}
 
 export interface PrismaAuditLogDelegate {
-  create(input: { readonly data: PrismaAuditLogCreateInput }): Promise<PrismaAuditLogRecord>;
-  findMany(input: { readonly orderBy: { readonly occurredAt: 'desc' } }): Promise<readonly PrismaAuditLogRecord[]>;
+  create(input: any): Promise<PrismaAuditLogRecord>;
+  findMany(input?: any): Promise<readonly PrismaAuditLogRecord[]>;
 }
 
 export interface PrismaAuditLogClient {
@@ -40,7 +38,7 @@ function toDomain(record: PrismaAuditLogRecord): AuditLog {
     action: record.action,
     entityType: record.entityType,
     entityId: record.entityId,
-    outcome: record.outcome,
+    outcome: record.outcome as AuditOutcome,
     occurredAt: toDomainIso(record.occurredAt),
     metadata: toReadonlyJsonObject(record.metadata),
   });
@@ -60,14 +58,27 @@ export class PrismaAuditLogRepository implements AuditLogRepository {
         entityId: input.entityId,
         outcome: input.outcome,
         occurredAt,
-        metadata: Object.freeze({ ...(input.metadata ?? {}) }),
+        metadata: Object.freeze({ ...(input.metadata ?? {}) }) as Prisma.InputJsonValue,
       },
     });
     return toDomain(created);
   }
 
-  async list(): Promise<readonly AuditLog[]> {
-    const records = await this.client.auditLog.findMany({ orderBy: { occurredAt: 'desc' } });
+  async list(filters?: AuditLogQueryFilters): Promise<readonly AuditLog[]> {
+    const where: PrismaAuditLogWhereInput = {};
+    if (filters?.actorUserId !== undefined) where.actorUserId = filters.actorUserId;
+    if (filters?.entityType !== undefined) where.entityType = filters.entityType;
+    if (filters?.entityId !== undefined) where.entityId = filters.entityId;
+    if (filters?.action !== undefined) where.action = filters.action;
+    if (filters?.outcome !== undefined) where.outcome = filters.outcome;
+
+    const records = await this.client.auditLog.findMany({
+      where: Object.keys(where).length > 0 ? where : undefined,
+      orderBy: [{ occurredAt: 'desc' }, { id: 'desc' }],
+      take: filters?.limit,
+    });
     return Object.freeze(records.map(toDomain));
   }
 }
+
+export { PrismaAuditLogRepository as PostgresAuditLogRepository };

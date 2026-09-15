@@ -12,9 +12,18 @@ export interface AuditLogRecordInput {
   readonly metadata?: Record<string, unknown>;
 }
 
+export interface AuditLogQueryFilters {
+  readonly actorUserId?: string | null;
+  readonly entityType?: string;
+  readonly entityId?: string;
+  readonly action?: string;
+  readonly outcome?: AuditOutcome;
+  readonly limit?: number;
+}
+
 export interface AuditLogRepository {
   record(input: AuditLogRecordInput): Promise<AuditLog>;
-  list(): Promise<readonly AuditLog[]>;
+  list(filters?: AuditLogQueryFilters): Promise<readonly AuditLog[]>;
 }
 
 export class InMemoryAuditLogRepository implements AuditLogRepository {
@@ -35,8 +44,35 @@ export class InMemoryAuditLogRepository implements AuditLogRepository {
     return entry;
   }
 
-  async list(): Promise<readonly AuditLog[]> {
-    return Object.freeze([...this.entries]);
+  async list(filters?: AuditLogQueryFilters): Promise<readonly AuditLog[]> {
+    let results = [...this.entries];
+    if (filters) {
+      if (filters.actorUserId !== undefined) {
+        results = results.filter((e) => e.actorUserId === filters.actorUserId);
+      }
+      if (filters.entityType !== undefined) {
+        results = results.filter((e) => e.entityType === filters.entityType);
+      }
+      if (filters.entityId !== undefined) {
+        results = results.filter((e) => e.entityId === filters.entityId);
+      }
+      if (filters.action !== undefined) {
+        results = results.filter((e) => e.action === filters.action);
+      }
+      if (filters.outcome !== undefined) {
+        results = results.filter((e) => e.outcome === filters.outcome);
+      }
+    }
+    results.sort((a, b) => {
+      if (a.occurredAt !== b.occurredAt) {
+        return b.occurredAt.localeCompare(a.occurredAt);
+      }
+      return b.id.localeCompare(a.id);
+    });
+    if (filters?.limit !== undefined && filters.limit > 0) {
+      results = results.slice(0, filters.limit);
+    }
+    return Object.freeze(results);
   }
 }
 
@@ -63,7 +99,7 @@ export class AuditLogService {
     });
   }
 
-  list(): Promise<readonly AuditLog[]> {
-    return this.repository.list();
+  list(filters?: AuditLogQueryFilters): Promise<readonly AuditLog[]> {
+    return this.repository.list(filters);
   }
 }
