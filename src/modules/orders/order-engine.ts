@@ -1,4 +1,5 @@
-import { advanceOrder, createOrder, isOrderComplete, type CreateOrderInput, type Order, type OrderStep } from './orders.js';
+import { ValidationError } from '../../core/errors.js';
+import { advanceOrder, createOrder, isOrderComplete, orderCycle, type CreateOrderInput, type Order, type OrderStep } from './orders.js';
 import type { OrderRepository } from './order-repository.js';
 
 export type OrderStepHandler = (context: {
@@ -50,26 +51,28 @@ export class OrderEngine {
   }
 
   async advance(params: AdvanceParams): Promise<Order> {
+    const handler = this.handlers[params.toStep];
+
     if (this.repository) {
-      const handler = this.handlers[params.toStep];
-      if (handler) {
-        await handler({
-          order: params.order,
-          actorId: params.actorId,
-          fromStep: params.order.currentStep,
-          toStep: params.toStep,
-        });
-      }
       return await this.repository.advanceWithLock({
         orderId: params.order.id,
         expectedFromStep: params.order.currentStep,
         toStep: params.toStep,
         actorId: params.actorId,
         metadata: params.metadata,
+        beforeCommit: handler
+          ? async (lockedOrder) => {
+              await handler({
+                order: lockedOrder,
+                actorId: params.actorId,
+                fromStep: lockedOrder.currentStep,
+                toStep: params.toStep,
+              });
+            }
+          : undefined,
       });
     }
 
-    const handler = this.handlers[params.toStep];
     if (handler) {
       await handler({
         order: params.order,
@@ -90,9 +93,14 @@ export class OrderEngine {
 
   async runToAudit(params: RunToAuditParams): Promise<Order> {
     let currentOrder = params.order;
-    const stepsToRun: OrderStep[] = ['validation', 'payment', 'execution', 'notification', 'receipt', 'history', 'audit'];
+    const currentIndex = orderCycle.indexOf(currentOrder.currentStep);
+    if (currentIndex === -1) {
+      throw new ValidationError(`Étape courante inconnue : ${currentOrder.currentStep}`);
+    }
 
-    for (const step of stepsToRun) {
+    const remainingSteps = orderCycle.slice(currentIndex + 1) as OrderStep[];
+
+    for (const step of remainingSteps) {
       if (isOrderComplete(currentOrder)) break;
       currentOrder = await this.advance({
         order: currentOrder,

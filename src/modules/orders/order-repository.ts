@@ -30,6 +30,7 @@ export interface AdvanceOrderTransactionalParams {
   readonly toStep: OrderStep;
   readonly actorId: string;
   readonly metadata?: Record<string, unknown>;
+  readonly beforeCommit?: (order: Order) => Promise<void> | void;
 }
 
 export interface OrderRepository {

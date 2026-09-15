@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { OrderEngine, advanceOrder, assertOrderTransition, createOrder, isOrderComplete, orderCycle, type OrderStep } from '../src/modules/orders/index.js';
+import { toSafeBigIntCents, fromSafeBigIntCents } from '../src/infrastructure/prisma/order-repository.js';
 
 test('order cycle exposes the official ordered states', () => {
   assert.equal(JSON.stringify(orderCycle), JSON.stringify(['creation', 'validation', 'payment', 'execution', 'notification', 'receipt', 'history', 'audit']));
@@ -70,6 +71,31 @@ test('OrderEngine runs generic handlers in sequence without embedding service-sp
   assert.equal(JSON.stringify(completed.transitions.map((transition) => transition.toStep)), JSON.stringify(orderCycle));
 });
 
+test('OrderEngine runToAudit reprend depuis le currentStep réel', async () => {
+  const visitedSteps: OrderStep[] = [];
+  const engine = new OrderEngine({
+    validation: ({ toStep }) => { visitedSteps.push(toStep); },
+    payment: ({ toStep }) => { visitedSteps.push(toStep); },
+    execution: ({ toStep }) => { visitedSteps.push(toStep); },
+    notification: ({ toStep }) => { visitedSteps.push(toStep); },
+    receipt: ({ toStep }) => { visitedSteps.push(toStep); },
+    history: ({ toStep }) => { visitedSteps.push(toStep); },
+    audit: ({ toStep }) => { visitedSteps.push(toStep); },
+  });
+
+  const order = engine.create({ requesterActorId: 'actor-1', serviceDefinitionId: 'configurable-service-definition', mode: 'manual' });
+  const validated = await engine.advance({ order, actorId: 'actor-1', toStep: 'validation' });
+  const paid = await engine.advance({ order: validated, actorId: 'actor-1', toStep: 'payment' });
+
+  // runToAudit must resume from 'payment' and execute 'execution' -> ... -> 'audit'
+  visitedSteps.length = 0; // reset
+  const completed = await engine.runToAudit({ order: paid, actorId: 'system-orchestrator' });
+
+  assert.equal(isOrderComplete(completed), true);
+  assert.equal(completed.currentStep, 'audit');
+  assert.equal(JSON.stringify(visitedSteps), JSON.stringify(['execution', 'notification', 'receipt', 'history', 'audit']));
+});
+
 test('OrderEngine stops if a step handler rejects before recording the transition', async () => {
   const engine = new OrderEngine({
     payment: () => {
@@ -88,6 +114,23 @@ test('OrderEngine stops if a step handler rejects before recording the transitio
   assert.equal(rejected, true);
   assert.equal(validated.currentStep, 'validation');
   assert.equal(validated.transitions.length, 2);
+});
+
+test('toSafeBigIntCents et fromSafeBigIntCents refusent les montants hors plage sûre', () => {
+  const UNSAFE_BIGINT = 9007199254740993n; // MAX_SAFE_INTEGER + 2
+  const SAFE_BIGINT = 9007199254740991n; // MAX_SAFE_INTEGER
+
+  assert.throws(() => toSafeBigIntCents(UNSAFE_BIGINT), /hors de la plage sûre/);
+  assert.throws(() => toSafeBigIntCents(-10n), /hors de la plage sûre/);
+  assert.throws(() => toSafeBigIntCents(9007199254740993), /entier positif ou nul/);
+  assert.throws(() => fromSafeBigIntCents(UNSAFE_BIGINT), /hors de la plage sûre/);
+
+  assert.equal(toSafeBigIntCents(SAFE_BIGINT), SAFE_BIGINT);
+  assert.equal(fromSafeBigIntCents(SAFE_BIGINT), 9007199254740991);
+  assert.equal(toSafeBigIntCents(100n), 100n);
+  assert.equal(toSafeBigIntCents(100), 100n);
+  assert.equal(toSafeBigIntCents(null), null);
+  assert.equal(fromSafeBigIntCents(null), null);
 });
 
 test('createOrder rejects missing generic configuration and invalid monetary intent', () => {

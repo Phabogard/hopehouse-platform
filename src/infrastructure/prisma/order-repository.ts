@@ -5,19 +5,28 @@ import type { Order, OrderTransition, OrderStep, OrderMode, OrderTransitionOutco
 import type { OrderRepository, CreateOrderParams, AdvanceOrderTransactionalParams } from '../../modules/orders/order-repository.js';
 import { assertOrderTransition } from '../../modules/orders/orders.js';
 
-type TransactionClient = Prisma.TransactionClient;
-
-function toSafeBigIntCents(amount: number | bigint | null | undefined): bigint | null {
+export function toSafeBigIntCents(amount: number | bigint | null | undefined): bigint | null {
   if (amount === null || amount === undefined) return null;
-  if (typeof amount === 'bigint') return amount;
-  if (!Number.isSafeInteger(amount) || amount < 0) {
-    throw new ValidationError(`Le montant doit être un entier positif ou nul : reçu ${amount}`);
+  if (typeof amount === 'bigint') {
+    if (amount < 0n || amount > BigInt(Number.MAX_SAFE_INTEGER)) {
+      throw new ValidationError(`Le montant bigint est hors de la plage sûre [0, ${Number.MAX_SAFE_INTEGER}] : reçu ${amount}`);
+    }
+    return amount;
   }
-  return BigInt(amount);
+  if (typeof amount === 'number') {
+    if (!Number.isSafeInteger(amount) || amount < 0) {
+      throw new ValidationError(`Le montant doit être un entier positif ou nul : reçu ${amount}`);
+    }
+    return BigInt(amount);
+  }
+  throw new ValidationError(`Type de montant invalide : ${typeof amount}`);
 }
 
-function fromSafeBigIntCents(amount: bigint | null): number | null {
+export function fromSafeBigIntCents(amount: bigint | null): number | null {
   if (amount === null) return null;
+  if (amount < 0n || amount > BigInt(Number.MAX_SAFE_INTEGER)) {
+    throw new ValidationError(`Le montant bigint stocké en base est hors de la plage sûre [0, ${Number.MAX_SAFE_INTEGER}] : reçu ${amount}`);
+  }
   return Number(amount);
 }
 
@@ -28,8 +37,20 @@ export class PrismaOrderRepository implements OrderRepository {
     const orderId = params.id ?? randomUUID();
     const orderNumber = params.orderNumber ?? orderId;
     const now = new Date();
+
+    const hasAmount = params.amountCents !== null && params.amountCents !== undefined;
+    const rawCurrency = params.currency ? params.currency.trim() : null;
+    const hasCurrency = rawCurrency !== null && rawCurrency.length > 0;
+
+    if (hasAmount !== hasCurrency) {
+      throw new ValidationError('Le montant et la devise doivent être fournis ensemble ou tous les deux absents');
+    }
+
     const amountBigInt = toSafeBigIntCents(params.amountCents);
-    const currency = params.currency ? params.currency.toUpperCase().trim() : null;
+    const currency = hasCurrency ? rawCurrency!.toUpperCase() : null;
+    if (currency && currency.length !== 3) {
+      throw new ValidationError('La devise de commande doit utiliser un code à trois caractères');
+    }
 
     return await this.prisma.$transaction(async (tx) => {
       const initialTransitionId = randomUUID();
@@ -64,7 +85,7 @@ export class PrismaOrderRepository implements OrderRepository {
         },
         include: {
           transitions: {
-            orderBy: { occurredAt: 'asc' },
+            orderBy: [{ occurredAt: 'asc' }, { id: 'asc' }],
           },
         },
       });
@@ -78,7 +99,7 @@ export class PrismaOrderRepository implements OrderRepository {
       where: { id: orderId },
       include: {
         transitions: {
-          orderBy: { occurredAt: 'asc' },
+          orderBy: [{ occurredAt: 'asc' }, { id: 'asc' }],
         },
       },
     });
@@ -91,7 +112,7 @@ export class PrismaOrderRepository implements OrderRepository {
       where: { orderNumber },
       include: {
         transitions: {
-          orderBy: { occurredAt: 'asc' },
+          orderBy: [{ occurredAt: 'asc' }, { id: 'asc' }],
         },
       },
     });
@@ -101,21 +122,55 @@ export class PrismaOrderRepository implements OrderRepository {
 
   /**
    * Concurrency protection via SELECT ... FOR UPDATE within a transaction.
-   * Locks the order row, verifies state machine transition, appends transition,
+   * Locks the order row, executes side-effect handlers (beforeCommit) under lock,
+   * verifies state machine transition, appends transition,
    * updates currentStep and updatedAt atomically.
    */
   async advanceWithLock(params: AdvanceOrderTransactionalParams): Promise<Order> {
     return await this.prisma.$transaction(async (tx) => {
       // 1. Row Lock (SELECT ... FOR UPDATE)
-      const lockedRows = await tx.$queryRaw<Array<{ id: string; current_step: string }>>`
-        SELECT id, current_step FROM "orders" WHERE id = ${params.orderId} FOR UPDATE
+      const lockedRows = await tx.$queryRaw<Array<{
+        id: string;
+        order_number: string;
+        current_step: string;
+        service_definition_id: string;
+        catalog_item_id: string | null;
+        mode: string;
+        requester_actor_id: string;
+        beneficiary_id: string | null;
+        channel: string | null;
+        amount_cents: bigint | null;
+        currency: string | null;
+        metadata_json: Prisma.JsonValue;
+        created_at: Date;
+        updated_at: Date;
+      }>>`
+        SELECT
+          id,
+          order_number,
+          current_step,
+          service_definition_id,
+          catalog_item_id,
+          mode,
+          requester_actor_id,
+          beneficiary_id,
+          channel,
+          amount_cents,
+          currency,
+          metadata_json,
+          created_at,
+          updated_at
+        FROM "orders"
+        WHERE id = ${params.orderId}
+        FOR UPDATE
       `;
 
       if (lockedRows.length === 0) {
         throw new ValidationError(`Commande introuvable : ${params.orderId}`);
       }
 
-      const currentStep = lockedRows[0]!.current_step as OrderStep;
+      const lockedRow = lockedRows[0]!;
+      const currentStep = lockedRow.current_step as OrderStep;
 
       if (currentStep !== params.expectedFromStep) {
         throw new ValidationError(`L'état courant de la commande est ${currentStep}`);
@@ -123,10 +178,38 @@ export class PrismaOrderRepository implements OrderRepository {
 
       assertOrderTransition(currentStep, params.toStep);
 
+      const existingTransitions = await tx.orderTransition.findMany({
+        where: { orderId: params.orderId },
+        orderBy: [{ occurredAt: 'asc' }, { id: 'asc' }],
+      });
+
+      const currentOrder = this.mapOrder({
+        id: lockedRow.id,
+        orderNumber: lockedRow.order_number,
+        currentStep: lockedRow.current_step as PrismaOrderStep,
+        serviceDefinitionId: lockedRow.service_definition_id,
+        catalogItemId: lockedRow.catalog_item_id,
+        mode: lockedRow.mode as PrismaOrderMode,
+        requesterActorId: lockedRow.requester_actor_id,
+        beneficiaryId: lockedRow.beneficiary_id,
+        channel: lockedRow.channel,
+        amountCents: lockedRow.amount_cents,
+        currency: lockedRow.currency,
+        metadataJson: lockedRow.metadata_json,
+        createdAt: lockedRow.created_at,
+        updatedAt: lockedRow.updated_at,
+        transitions: existingTransitions,
+      });
+
+      // 2. Execute beforeCommit handler under SELECT FOR UPDATE lock
+      if (params.beforeCommit) {
+        await params.beforeCommit(currentOrder);
+      }
+
       const now = new Date();
       const transitionId = randomUUID();
 
-      // 2. Insert transition
+      // 3. Insert transition
       await tx.orderTransition.create({
         data: {
           id: transitionId,
@@ -140,7 +223,7 @@ export class PrismaOrderRepository implements OrderRepository {
         },
       });
 
-      // 3. Update Order current_step
+      // 4. Update Order current_step
       const updatedOrderRow = await tx.order.update({
         where: { id: params.orderId },
         data: {
@@ -149,7 +232,7 @@ export class PrismaOrderRepository implements OrderRepository {
         },
         include: {
           transitions: {
-            orderBy: { occurredAt: 'asc' },
+            orderBy: [{ occurredAt: 'asc' }, { id: 'asc' }],
           },
         },
       });
@@ -161,7 +244,7 @@ export class PrismaOrderRepository implements OrderRepository {
   async getTransitionHistory(orderId: string): Promise<readonly OrderTransition[]> {
     const rows = await this.prisma.orderTransition.findMany({
       where: { orderId },
-      orderBy: { occurredAt: 'asc' },
+      orderBy: [{ occurredAt: 'asc' }, { id: 'asc' }],
     });
 
     return Object.freeze(rows.map((r) => this.mapTransition(r)));
@@ -193,8 +276,14 @@ export class PrismaOrderRepository implements OrderRepository {
       metadataJson: Prisma.JsonValue;
     }>;
   }): Order {
-    const monetaryIntent = row.amountCents !== null && row.currency !== null
-      ? Object.freeze({ amountCents: fromSafeBigIntCents(row.amountCents)!, currency: row.currency })
+    const hasAmount = row.amountCents !== null;
+    const hasCurrency = row.currency !== null;
+    if (hasAmount !== hasCurrency) {
+      throw new ValidationError('Incohérence en base de données : montant et devise doivent être présents ou absents tous les deux');
+    }
+
+    const monetaryIntent = hasAmount && hasCurrency
+      ? Object.freeze({ amountCents: fromSafeBigIntCents(row.amountCents)!, currency: row.currency! })
       : null;
 
     const metadata = typeof row.metadataJson === 'object' && row.metadataJson !== null

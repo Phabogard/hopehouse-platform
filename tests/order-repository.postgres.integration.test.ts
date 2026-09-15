@@ -153,7 +153,7 @@ test('order repository: création et persistance complète de la commande et de 
   }
 });
 
-test('order repository: intégrité Catalogue → Order (rejet DB en cas d\'incohérence entre serviceDefinitionId et catalogItemId)', { skip: databaseUrl === undefined }, async () => {
+test('order repository: intégrité Catalogue -> Order (rejet DB en cas de désaccord serviceDefinitionId / catalogItemId)', { skip: databaseUrl === undefined }, async () => {
   const client = integrationClient();
   const repo = new PrismaOrderRepository(client);
 
@@ -161,7 +161,6 @@ test('order repository: intégrité Catalogue → Order (rejet DB en cas d\'inco
     const { serviceId } = await createTestServiceAndCatalogItem(client);
     const { otherItemId } = await createMismatchedCatalogItem(client);
 
-    // Tentative d'associer serviceId A avec d'otherItemId appartenant à Service B
     let rejected = false;
     try {
       await repo.create({
@@ -172,7 +171,6 @@ test('order repository: intégrité Catalogue → Order (rejet DB en cas d\'inco
       });
     } catch (err: any) {
       rejected = true;
-      // Foreign key constraint violation expected
       assert.match(err.message, /foreign key|constraint|P2003/i);
     }
 
@@ -225,7 +223,7 @@ test('order repository: avancement séquentiel des transitions avec verrou de li
   }
 });
 
-test('order repository: concurrence d\'avancement sur la même commande rejetée proprement', { skip: databaseUrl === undefined }, async () => {
+test('order repository: concurrence d avancement sur la meme commande rejetee proprement', { skip: databaseUrl === undefined }, async () => {
   const client = integrationClient();
   const repo1 = new PrismaOrderRepository(client);
   const client2 = integrationClient();
@@ -239,7 +237,6 @@ test('order repository: concurrence d\'avancement sur la même commande rejetée
       requesterActorId: 'actor-init',
     });
 
-    // Deux tentatives simultanées de passer de 'creation' à 'validation'
     const [res1, res2] = await Promise.allSettled([
       repo1.advanceWithLock({
         orderId: order.id,
@@ -259,7 +256,7 @@ test('order repository: concurrence d\'avancement sur la même commande rejetée
     const rejected = [res1, res2].filter((r) => r.status === 'rejected');
 
     assert.equal(fulfilled.length, 1, 'Exactement une des deux requêtes concurrentes doit réussir');
-    assert.equal(rejected.length, 1, 'L\'autre doit échouer en conflit d\'état');
+    assert.equal(rejected.length, 1, 'L autre doit échouer en conflit d état');
 
     const finalOrder = await repo1.getById(order.id);
     assert.equal(finalOrder?.currentStep, 'validation');
@@ -267,5 +264,181 @@ test('order repository: concurrence d\'avancement sur la même commande rejetée
   } finally {
     await client.$disconnect();
     await client2.$disconnect();
+  }
+});
+
+test('order repository P1: rejet d un montant BigInt hors de la plage sure MAX_SAFE_INTEGER', { skip: databaseUrl === undefined }, async () => {
+  const client = integrationClient();
+  const repo = new PrismaOrderRepository(client);
+
+  try {
+    const { serviceId } = await createTestServiceAndCatalogItem(client);
+
+    await assert.rejects(
+      async () => {
+        await repo.create({
+          serviceDefinitionId: serviceId,
+          mode: 'manual',
+          requesterActorId: 'actor-1',
+          amountCents: 9007199254740993n, // Unsafe BigInt > MAX_SAFE_INTEGER
+          currency: 'USD',
+        });
+      },
+      (err: any) => err instanceof ValidationError && /hors de la plage sûre/.test(err.message)
+    );
+  } finally {
+    await client.$disconnect();
+  }
+});
+
+test('order engine + repository P1: verrou SELECT FOR UPDATE garantit qu un handler a effet de bord n est execute qu une seule fois', { skip: databaseUrl === undefined }, async () => {
+  const client1 = integrationClient();
+  const client2 = integrationClient();
+  const repo1 = new PrismaOrderRepository(client1);
+  const repo2 = new PrismaOrderRepository(client2);
+
+  let sideEffectCallCount = 0;
+
+  const engine1 = new OrderEngine(
+    {
+      validation: async () => {
+        sideEffectCallCount += 1;
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      },
+    },
+    repo1
+  );
+
+  const engine2 = new OrderEngine(
+    {
+      validation: async () => {
+        sideEffectCallCount += 1;
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      },
+    },
+    repo2
+  );
+
+  try {
+    const { serviceId } = await createTestServiceAndCatalogItem(client1);
+    const order = await repo1.create({
+      serviceDefinitionId: serviceId,
+      mode: 'automatic',
+      requesterActorId: 'actor-init',
+    });
+
+    const [res1, res2] = await Promise.allSettled([
+      engine1.advance({ order, actorId: 'actor-a', toStep: 'validation' }),
+      engine2.advance({ order, actorId: 'actor-b', toStep: 'validation' }),
+    ]);
+
+    const fulfilled = [res1, res2].filter((r) => r.status === 'fulfilled');
+    const rejected = [res1, res2].filter((r) => r.status === 'rejected');
+
+    assert.equal(fulfilled.length, 1, 'Exactement une transition concurrente doit réussir');
+    assert.equal(rejected.length, 1, 'L autre transition concurrente doit être rejetée');
+    assert.equal(sideEffectCallCount, 1, 'Le handler à effet de bord ne doit avoir été exécuté qu UNE SEULE FOIS');
+  } finally {
+    await client1.$disconnect();
+    await client2.$disconnect();
+  }
+});
+
+test('order repository P2: runToAudit reprend depuis une etape intermediaire sur PostgreSQL', { skip: databaseUrl === undefined }, async () => {
+  const client = integrationClient();
+  const repo = new PrismaOrderRepository(client);
+  const engine = new OrderEngine({}, repo);
+
+  try {
+    const { serviceId } = await createTestServiceAndCatalogItem(client);
+    const order = await engine.createPersisted({
+      serviceDefinitionId: serviceId,
+      mode: 'manual',
+      requesterActorId: 'actor-init',
+    });
+
+    const validated = await engine.advance({ order, actorId: 'actor-1', toStep: 'validation' });
+    const paid = await engine.advance({ order: validated, actorId: 'actor-1', toStep: 'payment' });
+
+    assert.equal(paid.currentStep, 'payment');
+
+    const completed = await engine.runToAudit({ order: paid, actorId: 'system' });
+    assert.equal(completed.currentStep, 'audit');
+    assert.equal(completed.transitions.length, 8);
+  } finally {
+    await client.$disconnect();
+  }
+});
+
+test('order repository P2: rejet des paires incoherentes montant / devise', { skip: databaseUrl === undefined }, async () => {
+  const client = integrationClient();
+  const repo = new PrismaOrderRepository(client);
+
+  try {
+    const { serviceId } = await createTestServiceAndCatalogItem(client);
+
+    await assert.rejects(
+      async () => {
+        await repo.create({
+          serviceDefinitionId: serviceId,
+          mode: 'manual',
+          requesterActorId: 'actor-1',
+          amountCents: 1000n,
+          currency: null,
+        });
+      },
+      (err: any) => err instanceof ValidationError && /montant et la devise/.test(err.message)
+    );
+
+    await assert.rejects(
+      async () => {
+        await repo.create({
+          serviceDefinitionId: serviceId,
+          mode: 'manual',
+          requesterActorId: 'actor-1',
+          amountCents: null,
+          currency: 'EUR',
+        });
+      },
+      (err: any) => err instanceof ValidationError && /montant et la devise/.test(err.message)
+    );
+  } finally {
+    await client.$disconnect();
+  }
+});
+
+test('order repository P2: ordre deterministe de l historique des transitions (occurredAt asc, id asc)', { skip: databaseUrl === undefined }, async () => {
+  const client = integrationClient();
+  const repo = new PrismaOrderRepository(client);
+
+  try {
+    const { serviceId } = await createTestServiceAndCatalogItem(client);
+    const order = await repo.create({
+      serviceDefinitionId: serviceId,
+      mode: 'manual',
+      requesterActorId: 'actor-1',
+    });
+
+    await repo.advanceWithLock({
+      orderId: order.id,
+      expectedFromStep: 'creation',
+      toStep: 'validation',
+      actorId: 'actor-1',
+    });
+
+    await repo.advanceWithLock({
+      orderId: order.id,
+      expectedFromStep: 'validation',
+      toStep: 'payment',
+      actorId: 'actor-1',
+    });
+
+    const history = await repo.getTransitionHistory(order.id);
+    assert.equal(history.length, 3);
+    assert.equal(history[0]?.toStep, 'creation');
+    assert.equal(history[1]?.toStep, 'validation');
+    assert.equal(history[2]?.toStep, 'payment');
+  } finally {
+    await client.$disconnect();
   }
 });

@@ -88,8 +88,8 @@ function validateMode(mode: OrderMode): OrderMode {
 
 function validateMonetaryIntent(input: OrderMonetaryIntent | null | undefined): OrderMonetaryIntent | null {
   if (input === undefined || input === null) return null;
-  if (!Number.isInteger(input.amountCents) || input.amountCents < 0) {
-    throw new ValidationError('Le montant de commande doit être un entier positif ou nul');
+  if (!Number.isSafeInteger(input.amountCents) || input.amountCents < 0) {
+    throw new ValidationError('Le montant de commande doit être un entier positif ou nul et sûrement représentable');
   }
   if (input.currency.trim().length !== 3) {
     throw new ValidationError('La devise de commande doit utiliser un code à trois caractères');
