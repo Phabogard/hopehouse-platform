@@ -543,3 +543,72 @@ model WalletReservation {
   @@index([walletId, status], name: "wallet_reservations_wallet_status_idx")
   @@map("wallet_reservations")
 }
+
+// ==========================================
+// MODULE ORDERS & ORDER TRANSITIONS
+// ==========================================
+
+enum OrderStep {
+  creation
+  validation
+  payment
+  execution
+  notification
+  receipt
+  history
+  audit
+}
+
+enum OrderMode {
+  manual
+  semi_automatic
+  automatic
+}
+
+enum OrderTransitionOutcome {
+  succeeded
+  failed
+}
+
+model Order {
+  id                  String     @id @map("id")
+  orderNumber         String     @unique @map("order_number")
+  currentStep         OrderStep  @default(creation) @map("current_step")
+  serviceDefinitionId String     @map("service_definition_id")
+  catalogItemId       String?    @map("catalog_item_id")
+  mode                OrderMode  @map("mode")
+  requesterActorId    String     @map("requester_actor_id")
+  beneficiaryId       String?    @map("beneficiary_id")
+  channel             String?    @map("channel")
+  amountCents         BigInt?    @map("amount_cents")
+  currency            String?    @map("currency")
+  metadataJson        Json       @map("metadata_json")
+  createdAt           DateTime   @default(now()) @db.Timestamptz(3) @map("created_at")
+  updatedAt           DateTime   @updatedAt @db.Timestamptz(3) @map("updated_at")
+
+  transitions OrderTransition[]
+
+  @@index([currentStep], name: "orders_current_step_idx")
+  @@index([serviceDefinitionId], name: "orders_service_definition_id_idx")
+  @@index([catalogItemId], name: "orders_catalog_item_id_idx")
+  @@index([requesterActorId], name: "orders_requester_actor_id_idx")
+  @@index([beneficiaryId], name: "orders_beneficiary_id_idx")
+  @@index([createdAt], name: "orders_created_at_idx")
+  @@map("orders")
+}
+
+model OrderTransition {
+  id           String                 @id @map("id")
+  orderId      String                 @map("order_id")
+  fromStep     OrderStep?             @map("from_step")
+  toStep       OrderStep              @map("to_step")
+  outcome      OrderTransitionOutcome @default(succeeded) @map("outcome")
+  actorId      String                 @map("actor_id")
+  occurredAt   DateTime               @default(now()) @db.Timestamptz(3) @map("occurred_at")
+  metadataJson Json                   @map("metadata_json")
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([orderId, occurredAt], name: "order_transitions_order_id_occurred_at_idx")
+  @@map("order_transitions")
+}

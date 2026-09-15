@@ -13,6 +13,7 @@ export interface OrderActorRef {
 
 export interface OrderConfigurationRef {
   serviceDefinitionId: string;
+  catalogItemId?: string | null;
   mode: OrderMode;
 }
 
@@ -50,6 +51,7 @@ export interface Order {
 export interface CreateOrderInput {
   requesterActorId: string;
   serviceDefinitionId: string;
+  catalogItemId?: string | null;
   mode: OrderMode;
   beneficiaryId?: string | null;
   channel?: string | null;
@@ -142,6 +144,7 @@ export function createOrder(input: CreateOrderInput): Order {
     currentStep: 'creation',
     configuration: {
       serviceDefinitionId: requireNonBlank(input.serviceDefinitionId, 'serviceDefinitionId'),
+      catalogItemId: normalizeOptionalString(input.catalogItemId),
       mode: validateMode(input.mode),
     },
     requester: { id: requesterActorId },
