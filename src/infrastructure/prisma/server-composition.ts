@@ -8,7 +8,7 @@ import { CreditWalletUseCase } from '../../modules/wallets/credit-wallet-use-cas
 import { PrismaWalletRepository } from '../../modules/wallets/prisma-wallet-repository.js';
 import { handleWalletHttp } from '../../modules/wallets/wallet-http.js';
 import { walletApiServiceFromUseCase, type WalletApiService } from '../../modules/wallets/wallet-api.js';
-import { PrismaAuditLogRepository } from './audit-log-repository.js';
+import { PrismaAuditLogRepository, PostgresAuditLogRepository } from './audit-log-repository.js';
 import { PrismaAuthRuntimeContext, resolvePrismaAuthSecurityPolicy, type PrismaAuthRuntimeClient, type PrismaAuthRuntimeOptions } from './auth-runtime.js';
 import { PrismaCatalogRepository } from './catalogue-repository.js';
 import { createPrismaClient, type CreatePrismaClientOptions } from './client.js';
@@ -27,6 +27,8 @@ export interface PrismaHopeHouseServerOptions {
 
 export interface PrismaHopeHouseServerComposition {
   readonly server: Server;
+  readonly client: PrismaClient;
+  readonly auditRepository: PostgresAuditLogRepository;
   readonly authRuntime: PrismaAuthRuntimeContext;
   readonly audit: AuditLogService;
   readonly catalogue: CatalogueService;
@@ -51,6 +53,7 @@ export async function createPrismaHopeHouseServer(options: PrismaHopeHouseServer
   });
   const policy = await resolvePrismaAuthSecurityPolicy(client, authOptions.policy);
   const authRuntime = new PrismaAuthRuntimeContext(client, { ...authOptions, policy });
+  const auditRepository = new PrismaAuditLogRepository(client);
   const audit = new AuditLogService(new PrismaAuditLogRepository(client));
   const catalogue = new CatalogueService(new PrismaCatalogRepository(client));
   const idempotency = new PostgresIdempotencyStore(client);
@@ -63,8 +66,8 @@ export async function createPrismaHopeHouseServer(options: PrismaHopeHouseServer
     createOutboxStore: (tx: Prisma.TransactionClient) => new PostgresOutboxStore(tx),
   });
   const wallet = walletApiServiceFromUseCase(creditWalletUseCase);
-  const orderRepository = new PrismaOrderRepository(client);
-  const orderEngine = new OrderEngine({}, orderRepository);
+  const orderRepository = new PrismaOrderRepository(client, auditRepository);
+  const orderEngine = new OrderEngine({}, orderRepository, audit);
   const baseServer = createHopeHouseServer({ authRuntime, audit, orderRepository, orderEngine });
   const server = createServer((request, response) => {
     const pathname = new URL(request.url ?? '/', 'http://localhost').pathname;
@@ -87,11 +90,13 @@ export async function createPrismaHopeHouseServer(options: PrismaHopeHouseServer
 
   return Object.freeze({
     server,
+    client,
     authRuntime,
     audit,
     catalogue,
     idempotency,
     wallet,
+    auditRepository,
     orderRepository,
     orderEngine,
     async close(): Promise<void> {

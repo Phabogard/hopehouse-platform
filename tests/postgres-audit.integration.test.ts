@@ -2,11 +2,11 @@ import { PrismaClient } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { PostgresAuditLogRepository, PrismaAuditLogRepository } from '../src/infrastructure/prisma/audit-log-repository.js';
+import { PostgresAuditLogRepository } from '../src/infrastructure/prisma/audit-log-repository.js';
 import { PrismaOrderRepository } from '../src/infrastructure/prisma/order-repository.js';
+import { createPrismaHopeHouseServer } from '../src/infrastructure/prisma/server-composition.js';
 import { AuditLogService } from '../src/modules/audit/audit-log.js';
 import { OrderEngine } from '../src/modules/orders/order-engine.js';
-import { ValidationError } from '../src/core/errors.js';
 
 const databaseUrl = process.env.DATABASE_URL;
 
@@ -249,6 +249,39 @@ test('postgres audit + order engine: création produit exactement UN audit order
   }
 });
 
+test('postgres audit + server composition: serveur production écrit l audit PostgreSQL sans doublon', { skip: databaseUrl === undefined }, async () => {
+  const composition = await createPrismaHopeHouseServer({
+    auth: { databaseUrl: databaseUrl as string, jwtSecret: 'test-secret-key-for-audit-composition-32-bytes' },
+  });
+
+  try {
+    const { serviceId } = await createTestServiceAndCatalogItem(composition.client);
+    const actorId = `actor-${randomUUID()}`;
+
+    const order = await composition.orderEngine.createPersisted({
+      serviceDefinitionId: serviceId,
+      mode: 'manual',
+      requesterActorId: actorId,
+    });
+
+    const auditLogs = await composition.auditRepository.list({ entityId: order.id });
+    assert.equal(auditLogs.length, 1, 'Exactement UN audit_log produit lors de la création de commande');
+    assert.equal(auditLogs[0]?.action, 'order.create');
+
+    const validated = await composition.orderEngine.advance({
+      order,
+      actorId,
+      toStep: 'validation',
+    });
+
+    const auditLogsAfterTransition = await composition.auditRepository.list({ entityId: validated.id });
+    assert.equal(auditLogsAfterTransition.length, 2, 'Exactement DEUX audit_logs au total sans doublon');
+    assert.equal(auditLogsAfterTransition[0]?.action, 'order.transition');
+  } finally {
+    await composition.close();
+  }
+});
+
 test('postgres audit isolation: l audit d une commande A ne se mélange pas avec l audit d une commande B', { skip: databaseUrl === undefined }, async () => {
   const client = integrationClient();
   const auditRepo = new PostgresAuditLogRepository(client);
@@ -285,7 +318,7 @@ test('postgres audit isolation: l audit d une commande A ne se mélange pas avec
   }
 });
 
-test('postgres audit rollback: annulation mid-transaction réelle de orders, order_transitions et audit_logs lors d une erreur', { skip: databaseUrl === undefined }, async () => {
+test('postgres audit rollback: annulation mid-transaction réelle de orders, order_transitions et audit_logs lors d une erreur (0 / 0 / 0)', { skip: databaseUrl === undefined }, async () => {
   const client = integrationClient();
   const { serviceId } = await createTestServiceAndCatalogItem(client);
   const testOrderId = `rollback-test-${randomUUID()}`;
