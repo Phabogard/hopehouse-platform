@@ -103,6 +103,7 @@ model CatalogItem {
   serviceDefinition ServiceDefinition? @relation(fields: [serviceDefinitionId], references: [id], onDelete: Restrict, onUpdate: Cascade)
   priceRules PriceRule[]
   commissionRules CommissionRule[]
+  orders Order[]
   @@unique([catalogId, code])
   @@unique([id, serviceDefinitionId])
   @@index([serviceDefinitionId, status])
@@ -158,6 +159,7 @@ model ServiceDefinition {
   modes ServiceMode[]
   priceRules PriceRule[]
   commissions CommissionRule[]
+  orders Order[]
   @@index([networkId, status])
   @@index([providerId, status])
   @@index([type, status])

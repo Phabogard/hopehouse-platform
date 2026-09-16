@@ -201,7 +201,7 @@ test('postgres audit repository: tri déterministe par occurredAt desc et id des
   }
 });
 
-test('postgres audit + order engine: transition de commande enregistre simultanément orders, order_transitions et audit_logs', { skip: databaseUrl === undefined }, async () => {
+test('postgres audit + order engine: création produit exactement UN audit order.create et une transition produit exactement UN audit order.transition', { skip: databaseUrl === undefined }, async () => {
   const client = integrationClient();
   const auditRepo = new PostgresAuditLogRepository(client);
   const orderRepo = new PrismaOrderRepository(client, auditRepo);
@@ -211,12 +211,19 @@ test('postgres audit + order engine: transition de commande enregistre simultan�
     const { serviceId } = await createTestServiceAndCatalogItem(client);
     const actorId = `actor-${randomUUID()}`;
 
+    // 1. Création de commande
     const order = await engine.createPersisted({
       serviceDefinitionId: serviceId,
       mode: 'automatic',
       requesterActorId: actorId,
     });
 
+    // Vérification: exactement UN audit order.create
+    const auditLogsAfterCreate = await auditRepo.list({ entityId: order.id });
+    assert.equal(auditLogsAfterCreate.length, 1);
+    assert.equal(auditLogsAfterCreate[0]?.action, 'order.create');
+
+    // 2. Transition de commande
     const validated = await engine.advance({
       order,
       actorId,
@@ -224,22 +231,19 @@ test('postgres audit + order engine: transition de commande enregistre simultan�
       metadata: { approver: 'manager-1' },
     });
 
-    // Verification complete dans PostgreSQL
-    // 1. Table orders
-    const orderInDb = await client.order.findUnique({ where: { id: order.id } });
-    assert.equal(orderInDb?.currentStep, 'validation');
+    // Verification: exactement DEUX audits au total (1 order.create + 1 order.transition)
+    const auditLogsAfterTransition = await auditRepo.list({ entityId: order.id });
+    assert.equal(auditLogsAfterTransition.length, 2);
+    assert.equal(auditLogsAfterTransition[0]?.action, 'order.transition');
+    assert.equal(auditLogsAfterTransition[0]?.metadata.toStep, 'validation');
+    assert.equal(auditLogsAfterTransition[0]?.metadata.approver, 'manager-1');
+    assert.equal(auditLogsAfterTransition[1]?.action, 'order.create');
 
-    // 2. Table order_transitions
-    const transitions = await client.orderTransition.findMany({ where: { orderId: order.id } });
-    assert.equal(transitions.length, 2); // creation + validation
-
-    // 3. Table audit_logs
-    const auditLogs = await auditRepo.list({ entityId: order.id });
-    assert.equal(auditLogs.length, 2); // order.create + order.transition
-    assert.equal(auditLogs[0]?.action, 'order.transition');
-    assert.equal(auditLogs[0]?.metadata.toStep, 'validation');
-    assert.equal(auditLogs[0]?.metadata.approver, 'manager-1');
-    assert.equal(auditLogs[1]?.action, 'order.create');
+    // Pas d audit en double
+    const createLogs = auditLogsAfterTransition.filter((l) => l.action === 'order.create');
+    const transitionLogs = auditLogsAfterTransition.filter((l) => l.action === 'order.transition');
+    assert.equal(createLogs.length, 1);
+    assert.equal(transitionLogs.length, 1);
   } finally {
     await client.$disconnect();
   }
@@ -281,7 +285,7 @@ test('postgres audit isolation: l audit d une commande A ne se mélange pas avec
   }
 });
 
-test('postgres audit rollback: annulation mid-transaction de orders, order_transitions et audit_logs lors d une erreur', { skip: databaseUrl === undefined }, async () => {
+test('postgres audit rollback: annulation mid-transaction réelle de orders, order_transitions et audit_logs lors d une erreur', { skip: databaseUrl === undefined }, async () => {
   const client = integrationClient();
   const { serviceId } = await createTestServiceAndCatalogItem(client);
   const testOrderId = `rollback-test-${randomUUID()}`;
@@ -332,7 +336,7 @@ test('postgres audit rollback: annulation mid-transaction de orders, order_trans
           },
         });
 
-        // 4. Force mid-transaction failure
+        // 4. Force mid-transaction failure AFTER all three inserts
         throw new Error('deliberate-mid-transaction-failure');
       });
     } catch (err: any) {
@@ -342,15 +346,15 @@ test('postgres audit rollback: annulation mid-transaction de orders, order_trans
 
     assert.equal(thrown, true, 'La transaction devait être interrompue');
 
-    // Vérification dans PostgreSQL que RIEN n a été persisté (rollback complet)
+    // Vérification dans PostgreSQL que 0 order, 0 order_transition et 0 audit_log subsistent
     const orderInDb = await client.order.findUnique({ where: { id: testOrderId } });
-    assert.equal(orderInDb, null, 'Order ne doit pas exister en base');
+    assert.equal(orderInDb, null, 'Order ne doit pas exister en base (0 order)');
 
     const transitionInDb = await client.orderTransition.findUnique({ where: { id: transitionId } });
-    assert.equal(transitionInDb, null, 'OrderTransition ne doit pas exister en base');
+    assert.equal(transitionInDb, null, 'OrderTransition ne doit pas exister en base (0 order_transition)');
 
     const auditInDb = await client.auditLog.findUnique({ where: { id: auditLogId } });
-    assert.equal(auditInDb, null, 'AuditLog ne doit pas exister en base');
+    assert.equal(auditInDb, null, 'AuditLog ne doit pas exister en base (0 audit_log)');
   } finally {
     await client.$disconnect();
   }
