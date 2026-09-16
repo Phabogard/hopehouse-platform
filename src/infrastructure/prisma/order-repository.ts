@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { ValidationError } from '../../core/errors.js';
 import type { Order, OrderTransition, OrderStep, OrderMode, OrderTransitionOutcome } from '../../modules/orders/orders.js';
 import type { OrderRepository, CreateOrderParams, AdvanceOrderTransactionalParams } from '../../modules/orders/order-repository.js';
+import type { AuditLogRepository } from '../../modules/audit/audit-log.js';
 import { assertOrderTransition } from '../../modules/orders/orders.js';
 
 export function toSafeBigIntCents(amount: number | bigint | null | undefined): bigint | null {
@@ -31,7 +32,10 @@ export function fromSafeBigIntCents(amount: bigint | null): number | null {
 }
 
 export class PrismaOrderRepository implements OrderRepository {
-  constructor(private readonly prisma: PrismaClient) {}
+  constructor(
+    private readonly prisma: PrismaClient,
+    private readonly auditRepository?: AuditLogRepository,
+  ) {}
 
   async create(params: CreateOrderParams): Promise<Order> {
     const orderId = params.id ?? randomUUID();
@@ -90,6 +94,24 @@ export class PrismaOrderRepository implements OrderRepository {
         },
       });
 
+      if (this.auditRepository) {
+        await tx.auditLog.create({
+          data: {
+            id: randomUUID(),
+            actorUserId: params.requesterActorId,
+            action: 'order.create',
+            entityType: 'order',
+            entityId: orderId,
+            outcome: 'success',
+            occurredAt: now,
+            metadata: {
+              serviceDefinitionId: params.serviceDefinitionId,
+              mode: params.mode,
+            } as Prisma.InputJsonValue,
+          },
+        });
+      }
+
       return this.mapOrder(orderRow);
     });
   }
@@ -124,7 +146,7 @@ export class PrismaOrderRepository implements OrderRepository {
    * Concurrency protection via SELECT ... FOR UPDATE within a transaction.
    * Locks the order row, executes side-effect handlers (beforeCommit) under lock,
    * verifies state machine transition, appends transition,
-   * updates currentStep and updatedAt atomically.
+   * writes audit log, and updates currentStep and updatedAt atomically.
    */
   async advanceWithLock(params: AdvanceOrderTransactionalParams): Promise<Order> {
     return await this.prisma.$transaction(async (tx) => {
@@ -141,7 +163,7 @@ export class PrismaOrderRepository implements OrderRepository {
         channel: string | null;
         amount_cents: bigint | null;
         currency: string | null;
-        metadata_json: Prisma.JsonValue;
+        metadata_json: Prisma.InputJsonValue;
         created_at: Date;
         updated_at: Date;
       }>>`
@@ -195,7 +217,7 @@ export class PrismaOrderRepository implements OrderRepository {
         channel: lockedRow.channel,
         amountCents: lockedRow.amount_cents,
         currency: lockedRow.currency,
-        metadataJson: lockedRow.metadata_json,
+        metadataJson: lockedRow.metadata_json as Prisma.JsonValue,
         createdAt: lockedRow.created_at,
         updatedAt: lockedRow.updated_at,
         transitions: existingTransitions,
@@ -236,6 +258,26 @@ export class PrismaOrderRepository implements OrderRepository {
           },
         },
       });
+
+      // 5. Atomic AuditLog insertion
+      if (this.auditRepository) {
+        await tx.auditLog.create({
+          data: {
+            id: randomUUID(),
+            actorUserId: params.actorId,
+            action: 'order.transition',
+            entityType: 'order',
+            entityId: params.orderId,
+            outcome: 'success',
+            occurredAt: now,
+            metadata: {
+              fromStep: currentStep,
+              toStep: params.toStep,
+              ...(params.metadata ?? {}),
+            } as Prisma.InputJsonValue,
+          },
+        });
+      }
 
       return this.mapOrder(updatedOrderRow);
     });
