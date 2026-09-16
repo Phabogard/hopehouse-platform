@@ -1,6 +1,18 @@
 import { randomUUID } from 'node:crypto';
 import { type AuditLog, type AuditOutcome } from '../../core/types.js';
 
+export function deepFreeze<T>(obj: T): T {
+  if (obj === null || typeof obj !== 'object') return obj;
+  Object.freeze(obj);
+  for (const prop of Object.getOwnPropertyNames(obj)) {
+    const val = (obj as Record<string, unknown>)[prop];
+    if (val !== null && typeof val === 'object' && !Object.isFrozen(val)) {
+      deepFreeze(val);
+    }
+  }
+  return obj;
+}
+
 export interface AuditLogRecordInput {
   readonly id: string;
   readonly actorUserId: string | null;
@@ -30,7 +42,7 @@ export class InMemoryAuditLogRepository implements AuditLogRepository {
   private readonly entries: AuditLog[] = [];
 
   async record(input: AuditLogRecordInput): Promise<AuditLog> {
-    const entry: AuditLog = Object.freeze({
+    const entry: AuditLog = deepFreeze({
       id: input.id,
       actorUserId: input.actorUserId,
       action: input.action,
@@ -38,7 +50,7 @@ export class InMemoryAuditLogRepository implements AuditLogRepository {
       entityId: input.entityId,
       outcome: input.outcome,
       occurredAt: input.occurredAt,
-      metadata: Object.freeze({ ...(input.metadata ?? {}) }),
+      metadata: deepFreeze({ ...(input.metadata ?? {}) }),
     });
     this.entries.push(entry);
     return entry;
@@ -101,5 +113,9 @@ export class AuditLogService {
 
   list(filters?: AuditLogQueryFilters): Promise<readonly AuditLog[]> {
     return this.repository.list(filters);
+  }
+
+  getRepository(): AuditLogRepository {
+    return this.repository;
   }
 }

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { AuditLogService, InMemoryAuditLogRepository } from '../src/modules/audit/audit-log.js';
 
-test('audit entries and metadata are immutable after recording', async () => {
+test('audit entries and metadata are deeply immutable after recording', async () => {
   const audit = new AuditLogService();
   const entry = await audit.record({
     actorUserId: 'u1',
@@ -10,7 +10,7 @@ test('audit entries and metadata are immutable after recording', async () => {
     entityType: 'beneficiary',
     entityId: 'BEN-001',
     outcome: 'success',
-    metadata: { reference: 'BEN-001' },
+    metadata: { reference: 'BEN-001', nested: { role: 'admin' } },
   });
 
   assert.throws(() => {
@@ -19,8 +19,12 @@ test('audit entries and metadata are immutable after recording', async () => {
   assert.throws(() => {
     (entry.metadata as Record<string, unknown>).reference = 'BEN-002';
   });
+  assert.throws(() => {
+    ((entry.metadata as Record<string, any>).nested).role = 'hacked';
+  });
   assert.equal(entry.action, 'beneficiary.create');
   assert.equal(entry.metadata.reference, 'BEN-001');
+  assert.equal((entry.metadata as any).nested.role, 'admin');
 });
 
 test('audit list cannot be used to mutate the audit log collection', async () => {

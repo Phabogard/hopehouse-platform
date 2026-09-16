@@ -281,34 +281,77 @@ test('postgres audit isolation: l audit d une commande A ne se mélange pas avec
   }
 });
 
-test('postgres audit rollback: annulation globale en cas d échec transactionnel (aucun audit orphelin persistant)', { skip: databaseUrl === undefined }, async () => {
+test('postgres audit rollback: annulation mid-transaction de orders, order_transitions et audit_logs lors d une erreur', { skip: databaseUrl === undefined }, async () => {
   const client = integrationClient();
   const auditRepo = new PostgresAuditLogRepository(client);
-  const orderRepo = new PrismaOrderRepository(client, auditRepo);
+  const { serviceId } = await createTestServiceAndCatalogItem(client);
+  const testOrderId = `rollback-test-${randomUUID()}`;
+  const transitionId = `trans-rollback-${randomUUID()}`;
+  const auditLogId = `audit-rollback-${randomUUID()}`;
 
   try {
-    const { serviceId } = await createTestServiceAndCatalogItem(client);
-    const fakeOrderId = `invalid-order-${randomUUID()}`;
-
-    // Tentative d avancement sur une commande inexistante
-    let failed = false;
+    let thrown = false;
     try {
-      await orderRepo.advanceWithLock({
-        orderId: fakeOrderId,
-        expectedFromStep: 'creation',
-        toStep: 'validation',
-        actorId: 'actor-fail',
+      await client.$transaction(async (tx) => {
+        // 1. Insert order
+        await tx.order.create({
+          data: {
+            id: testOrderId,
+            orderNumber: testOrderId,
+            currentStep: 'creation',
+            serviceDefinitionId: serviceId,
+            mode: 'manual',
+            requesterActorId: 'actor-rollback',
+            metadataJson: {},
+          },
+        });
+
+        // 2. Insert order_transition
+        await tx.orderTransition.create({
+          data: {
+            id: transitionId,
+            orderId: testOrderId,
+            fromStep: null,
+            toStep: 'creation',
+            outcome: 'succeeded',
+            actorId: 'actor-rollback',
+            metadataJson: {},
+          },
+        });
+
+        // 3. Insert audit_log
+        await tx.auditLog.create({
+          data: {
+            id: auditLogId,
+            actorUserId: 'actor-rollback',
+            action: 'order.create',
+            entityType: 'order',
+            entityId: testOrderId,
+            outcome: 'success',
+            occurredAt: new Date(),
+            metadata: { test: 'rollback' },
+          },
+        });
+
+        // 4. Force mid-transaction failure
+        throw new Error('deliberate-mid-transaction-failure');
       });
     } catch (err: any) {
-      failed = true;
-      assert.match(err.message, /Commande introuvable/);
+      thrown = true;
+      assert.equal(err.message, 'deliberate-mid-transaction-failure');
     }
 
-    assert.equal(failed, true);
+    assert.equal(thrown, true, 'La transaction devait être interrompue');
 
-    // Vérification qu aucun audit_log orphelin n a été créé pour fakeOrderId
-    const auditLogs = await auditRepo.list({ entityId: fakeOrderId });
-    assert.equal(auditLogs.length, 0);
+    // Vérification dans PostgreSQL que RIEN n a été persisté (rollback complet)
+    const orderInDb = await client.order.findUnique({ where: { id: testOrderId } });
+    assert.equal(orderInDb, null, 'Order ne doit pas exister en base');
+
+    const transitionInDb = await client.orderTransition.findUnique({ where: { id: transitionId } });
+    assert.equal(transitionInDb, null, 'OrderTransition ne doit pas exister en base');
+
+    const auditInDb = await client.auditLog.findUnique({ where: { id: auditLogId } });
+    assert.equal(auditInDb, null, 'AuditLog ne doit pas exister en base');
   } finally {
     await client.$disconnect();
   }

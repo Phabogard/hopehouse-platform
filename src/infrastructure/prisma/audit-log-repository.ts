@@ -1,5 +1,5 @@
 import type { Prisma, PrismaClient } from '@prisma/client';
-import type { AuditLogRepository, AuditLogRecordInput, AuditLogQueryFilters } from '../../modules/audit/audit-log.js';
+import { deepFreeze, type AuditLogRepository, type AuditLogRecordInput, type AuditLogQueryFilters } from '../../modules/audit/audit-log.js';
 import type { AuditLog, AuditOutcome } from '../../core/types.js';
 import { parseDomainDate, toDomainIso, toReadonlyJsonObject } from './mappers.js';
 
@@ -32,7 +32,7 @@ export interface PrismaAuditLogClient {
 }
 
 function toDomain(record: PrismaAuditLogRecord): AuditLog {
-  return Object.freeze({
+  return deepFreeze({
     id: record.id,
     actorUserId: record.actorUserId,
     action: record.action,
@@ -40,7 +40,7 @@ function toDomain(record: PrismaAuditLogRecord): AuditLog {
     entityId: record.entityId,
     outcome: record.outcome as AuditOutcome,
     occurredAt: toDomainIso(record.occurredAt),
-    metadata: toReadonlyJsonObject(record.metadata),
+    metadata: deepFreeze(toReadonlyJsonObject(record.metadata)),
   });
 }
 
@@ -58,7 +58,7 @@ export class PrismaAuditLogRepository implements AuditLogRepository {
         entityId: input.entityId,
         outcome: input.outcome,
         occurredAt,
-        metadata: Object.freeze({ ...(input.metadata ?? {}) }) as Prisma.InputJsonValue,
+        metadata: deepFreeze({ ...(input.metadata ?? {}) }) as Prisma.InputJsonValue,
       },
     });
     return toDomain(created);
