@@ -1,7 +1,6 @@
 import { ValidationError } from '../../core/errors.js';
 import { advanceOrder, createOrder, isOrderComplete, orderCycle, type CreateOrderInput, type Order, type OrderStep } from './orders.js';
 import type { OrderRepository } from './order-repository.js';
-import type { AuditLogService } from '../audit/audit-log.js';
 
 export type OrderStepHandler = (context: {
   readonly order: Order;
@@ -28,7 +27,6 @@ export class OrderEngine {
   constructor(
     private readonly handlers: OrderStepHandlers = {},
     private readonly repository?: OrderRepository,
-    private readonly audit?: AuditLogService,
   ) {}
 
   create(input: CreateOrderInput): Order {
@@ -49,18 +47,7 @@ export class OrderEngine {
         metadata: input.metadata,
       });
     }
-    const order = createOrder(input);
-    if (this.audit) {
-      await this.audit.record({
-        actorUserId: input.requesterActorId,
-        action: 'order.create',
-        entityType: 'order',
-        entityId: order.id,
-        outcome: 'success',
-        metadata: { serviceDefinitionId: input.serviceDefinitionId, mode: input.mode },
-      });
-    }
-    return order;
+    return createOrder(input);
   }
 
   async advance(params: AdvanceParams): Promise<Order> {
@@ -95,26 +82,13 @@ export class OrderEngine {
       });
     }
 
-    const advanced = advanceOrder({
+    return advanceOrder({
       order: params.order,
       actorId: params.actorId,
       expectedFromStep: params.order.currentStep,
       toStep: params.toStep,
       metadata: params.metadata,
     });
-
-    if (this.audit) {
-      await this.audit.record({
-        actorUserId: params.actorId,
-        action: 'order.transition',
-        entityType: 'order',
-        entityId: advanced.id,
-        outcome: 'success',
-        metadata: { fromStep: params.order.currentStep, toStep: params.toStep, ...(params.metadata ?? {}) },
-      });
-    }
-
-    return advanced;
   }
 
   async runToAudit(params: RunToAuditParams): Promise<Order> {

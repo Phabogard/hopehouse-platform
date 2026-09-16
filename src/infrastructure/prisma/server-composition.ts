@@ -67,7 +67,7 @@ export async function createPrismaHopeHouseServer(options: PrismaHopeHouseServer
   });
   const wallet = walletApiServiceFromUseCase(creditWalletUseCase);
   const orderRepository = new PrismaOrderRepository(client, auditRepository);
-  const orderEngine = new OrderEngine({}, orderRepository, audit);
+  const orderEngine = new OrderEngine({}, orderRepository);
   const baseServer = createHopeHouseServer({ authRuntime, audit, orderRepository, orderEngine });
   const server = createServer((request, response) => {
     const pathname = new URL(request.url ?? '/', 'http://localhost').pathname;

@@ -586,9 +586,7 @@ model Order {
   createdAt           DateTime   @default(now()) @db.Timestamptz(3) @map("created_at")
   updatedAt           DateTime   @updatedAt @db.Timestamptz(3) @map("updated_at")
 
-  serviceDefinition ServiceDefinition @relation(fields: [serviceDefinitionId], references: [id], onDelete: Restrict, onUpdate: Cascade)
-  catalogItem       CatalogItem?      @relation(fields: [serviceDefinitionId, catalogItemId], references: [serviceDefinitionId, id], onDelete: Restrict, onUpdate: Cascade)
-  transitions       OrderTransition[]
+  transitions OrderTransition[]
 
   @@index([currentStep], name: "orders_current_step_idx")
   @@index([serviceDefinitionId], name: "orders_service_definition_id_idx")
