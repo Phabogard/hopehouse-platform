@@ -283,7 +283,6 @@ test('postgres audit isolation: l audit d une commande A ne se mélange pas avec
 
 test('postgres audit rollback: annulation mid-transaction de orders, order_transitions et audit_logs lors d une erreur', { skip: databaseUrl === undefined }, async () => {
   const client = integrationClient();
-  const auditRepo = new PostgresAuditLogRepository(client);
   const { serviceId } = await createTestServiceAndCatalogItem(client);
   const testOrderId = `rollback-test-${randomUUID()}`;
   const transitionId = `trans-rollback-${randomUUID()}`;
