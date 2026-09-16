@@ -251,7 +251,10 @@ test('postgres audit + order engine: création produit exactement UN audit order
 
 test('postgres audit + server composition: serveur production écrit l audit PostgreSQL sans doublon', { skip: databaseUrl === undefined }, async () => {
   const composition = await createPrismaHopeHouseServer({
-    auth: { databaseUrl: databaseUrl as string, jwtSecret: 'test-secret-key-for-audit-composition-32-bytes' },
+    auth: {
+      databaseUrl: databaseUrl as string,
+      jwtSecret: 'test-secret-key-for-audit-composition-32-bytes',
+    },
   });
 
   try {

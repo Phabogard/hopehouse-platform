@@ -163,7 +163,7 @@ export class PrismaOrderRepository implements OrderRepository {
         channel: string | null;
         amount_cents: bigint | null;
         currency: string | null;
-        metadata_json: Prisma.JsonValue;
+        metadata_json: Prisma.InputJsonValue;
         created_at: Date;
         updated_at: Date;
       }>>`
@@ -217,7 +217,7 @@ export class PrismaOrderRepository implements OrderRepository {
         channel: lockedRow.channel,
         amountCents: lockedRow.amount_cents,
         currency: lockedRow.currency,
-        metadataJson: lockedRow.metadata_json,
+        metadataJson: lockedRow.metadata_json as Prisma.JsonValue,
         createdAt: lockedRow.created_at,
         updatedAt: lockedRow.updated_at,
         transitions: existingTransitions,

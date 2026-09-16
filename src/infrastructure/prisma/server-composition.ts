@@ -92,11 +92,11 @@ export async function createPrismaHopeHouseServer(options: PrismaHopeHouseServer
     server,
     client,
     authRuntime,
+    auditRepository,
     audit,
     catalogue,
     idempotency,
     wallet,
-    auditRepository,
     orderRepository,
     orderEngine,
     async close(): Promise<void> {
