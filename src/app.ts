@@ -271,8 +271,8 @@ export function createHopeHouseServer(options: HopeHouseServerOptions = {}) {
           : orderEngine.create(orderInput);
         if (!orderRepository) {
           orders.set(order.id, order);
+          await audit.record({ actorUserId: currentActor.id, action: 'order.create', entityType: 'order', entityId: order.id, outcome: 'success' });
         }
-        await audit.record({ actorUserId: currentActor.id, action: 'order.create', entityType: 'order', entityId: order.id, outcome: 'success' });
         sendJson(response, 201, { data: order });
         return;
       }
@@ -293,8 +293,8 @@ export function createHopeHouseServer(options: HopeHouseServerOptions = {}) {
         });
         if (!orderRepository) {
           orders.set(advancedOrder.id, advancedOrder);
+          await audit.record({ actorUserId: currentActor.id, action: 'order.transition', entityType: 'order', entityId: advancedOrder.id, outcome: 'success', metadata: { toStep: advancedOrder.currentStep } });
         }
-        await audit.record({ actorUserId: currentActor.id, action: 'order.transition', entityType: 'order', entityId: advancedOrder.id, outcome: 'success', metadata: { toStep: advancedOrder.currentStep } });
         sendJson(response, 200, { data: advancedOrder });
         return;
       }

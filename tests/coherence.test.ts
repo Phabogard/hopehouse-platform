@@ -426,7 +426,9 @@ test('database contract aligns durable Audit persistence and Prisma composition'
   assert.equal(repository.includes('export class PrismaAuditLogRepository implements AuditLogRepository'), true);
   assert.equal(repository.includes('this.client.auditLog.create'), true);
   assert.equal(repository.includes('this.client.auditLog.findMany'), true);
-  assert.equal(composition.includes('new AuditLogService(new PrismaAuditLogRepository(client))'), true);
+  assert.equal(composition.includes('const auditRepository = new PrismaAuditLogRepository(client);'), true);
+  assert.equal(composition.includes('const audit = new AuditLogService(auditRepository);'), true);
+  assert.equal(composition.includes('new PrismaOrderRepository(client, auditRepository)'), true);
   assert.equal(service.includes('new InMemoryAuditLogRepository()'), true);
 });
 
