@@ -245,8 +245,11 @@ export class PrismaWalletRepository {
     return transaction === null ? null : this.mapTransaction(transaction);
   }
 
-  async credit(params: CreditWalletParams): Promise<WalletTransactionDto> {
-    // Fast-path read check before starting transaction
+  async credit(params: CreditWalletParams, externalTx?: Prisma.TransactionClient): Promise<WalletTransactionDto> {
+    if (externalTx) {
+      return this.creditWithinTransaction(externalTx, params);
+    }
+
     if (params.transactionKey) {
       const existingTx = await this.prisma.walletTransaction.findFirst({
         where: { walletId: params.walletId, transactionKey: params.transactionKey },
@@ -271,16 +274,6 @@ export class PrismaWalletRepository {
     }
   }
 
-  /**
-   * Performs the credit mutation (balance upsert + WalletTransaction insert)
-   * using a Prisma client already inside a transaction owned by the caller
-   * (e.g. an application-layer use case combining Wallet + Idempotency +
-   * Outbox writes in a single PostgreSQL transaction).
-   *
-   * This method never opens or commits a transaction itself — that is the
-   * caller's responsibility. It does perform the same idempotence check on
-   * `transactionKey` as `credit()`, so it is safe to call directly.
-   */
   async creditWithinTransaction(
     tx: Prisma.TransactionClient,
     params: CreditWalletParams,
@@ -288,8 +281,6 @@ export class PrismaWalletRepository {
     const amountBigInt = toSafeBigIntCents(params.amountCents);
     const currency = validateCurrency(params.currency);
 
-    // 1. Idempotence Check (wallet-level transactionKey, distinct from the
-    //    command-level Idempotency-Key handled by the caller, if any).
     if (params.transactionKey) {
       const existingTx = await tx.walletTransaction.findFirst({
         where: { walletId: params.walletId, transactionKey: params.transactionKey },
@@ -299,7 +290,6 @@ export class PrismaWalletRepository {
       }
     }
 
-    // 2. Lock / Upsert Balance
     await tx.walletBalance.upsert({
       where: {
         walletId_currency: { walletId: params.walletId, currency },
@@ -315,7 +305,6 @@ export class PrismaWalletRepository {
       },
     });
 
-    // 3. Create Transaction
     const transaction = await tx.walletTransaction.create({
       data: {
         id: params.transactionId,
@@ -335,11 +324,11 @@ export class PrismaWalletRepository {
     return this.mapTransaction(transaction);
   }
 
-  async debit(params: DebitWalletParams): Promise<WalletTransactionDto> {
-    const amountBigInt = toSafeBigIntCents(params.amountCents);
-    const currency = validateCurrency(params.currency);
+  async debit(params: DebitWalletParams, externalTx?: Prisma.TransactionClient): Promise<WalletTransactionDto> {
+    if (externalTx) {
+      return this.debitWithinTransaction(externalTx, params);
+    }
 
-    // Fast-path read check
     if (params.transactionKey) {
       const existingTx = await this.prisma.walletTransaction.findFirst({
         where: { walletId: params.walletId, transactionKey: params.transactionKey },
@@ -350,55 +339,7 @@ export class PrismaWalletRepository {
     }
 
     try {
-      return await this.prisma.$transaction(async (tx) => {
-        // 1. Idempotence Check
-        if (params.transactionKey) {
-          const existingTx = await tx.walletTransaction.findFirst({
-            where: { walletId: params.walletId, transactionKey: params.transactionKey },
-          });
-          if (existingTx) {
-            return this.mapTransaction(existingTx);
-          }
-        }
-
-        // 2. Lock and Check Balance
-        const balance = await tx.walletBalance.findUnique({
-          where: { walletId_currency: { walletId: params.walletId, currency } },
-        });
-
-        if (!balance || balance.availableCents < amountBigInt) {
-          throw new ValidationError(
-            `Insufficient available balance in ${currency}: requested ${params.amountCents}, available ${balance ? fromSafeBigIntCents(balance.availableCents) : 0}`
-          );
-        }
-
-        // 3. Decrement Balance
-        await tx.walletBalance.update({
-          where: { walletId_currency: { walletId: params.walletId, currency } },
-          data: {
-            availableCents: { decrement: amountBigInt },
-          },
-        });
-
-        // 4. Create Transaction
-        const transaction = await tx.walletTransaction.create({
-          data: {
-            id: params.transactionId,
-            walletId: params.walletId,
-            currency,
-            amountCents: amountBigInt,
-            type: WalletTransactionType.DEBIT,
-            status: WalletTransactionStatus.SETTLED,
-            actorId: params.actorId,
-            transactionKey: params.transactionKey ?? null,
-            relatedEntityType: params.relatedEntityType ?? null,
-            relatedEntityId: params.relatedEntityId ?? null,
-            metadataJson: (params.metadata ?? {}) as Prisma.InputJsonValue,
-          },
-        });
-
-        return this.mapTransaction(transaction);
-      });
+      return await this.prisma.$transaction(async (tx) => this.debitWithinTransaction(tx, params));
     } catch (err: any) {
       if (params.transactionKey && isTransactionKeyUniqueViolation(err)) {
         const winnerTx = await this.prisma.walletTransaction.findFirst({
@@ -412,11 +353,66 @@ export class PrismaWalletRepository {
     }
   }
 
-  async reserve(params: ReserveWalletParams): Promise<{ transaction: WalletTransactionDto; reservation: WalletReservationDto }> {
+  async debitWithinTransaction(
+    tx: Prisma.TransactionClient,
+    params: DebitWalletParams,
+  ): Promise<WalletTransactionDto> {
     const amountBigInt = toSafeBigIntCents(params.amountCents);
     const currency = validateCurrency(params.currency);
 
-    // Fast-path read check
+    if (params.transactionKey) {
+      const existingTx = await tx.walletTransaction.findFirst({
+        where: { walletId: params.walletId, transactionKey: params.transactionKey },
+      });
+      if (existingTx) {
+        return this.mapTransaction(existingTx);
+      }
+    }
+
+    const balance = await tx.walletBalance.findUnique({
+      where: { walletId_currency: { walletId: params.walletId, currency } },
+    });
+
+    if (!balance || balance.availableCents < amountBigInt) {
+      throw new ValidationError(
+        `Insufficient available balance in ${currency}: requested ${params.amountCents}, available ${balance ? fromSafeBigIntCents(balance.availableCents) : 0}`
+      );
+    }
+
+    await tx.walletBalance.update({
+      where: { walletId_currency: { walletId: params.walletId, currency } },
+      data: {
+        availableCents: { decrement: amountBigInt },
+      },
+    });
+
+    const transaction = await tx.walletTransaction.create({
+      data: {
+        id: params.transactionId,
+        walletId: params.walletId,
+        currency,
+        amountCents: amountBigInt,
+        type: WalletTransactionType.DEBIT,
+        status: WalletTransactionStatus.SETTLED,
+        actorId: params.actorId,
+        transactionKey: params.transactionKey ?? null,
+        relatedEntityType: params.relatedEntityType ?? null,
+        relatedEntityId: params.relatedEntityId ?? null,
+        metadataJson: (params.metadata ?? {}) as Prisma.InputJsonValue,
+      },
+    });
+
+    return this.mapTransaction(transaction);
+  }
+
+  async reserve(
+    params: ReserveWalletParams,
+    externalTx?: Prisma.TransactionClient
+  ): Promise<{ transaction: WalletTransactionDto; reservation: WalletReservationDto }> {
+    if (externalTx) {
+      return this.reserveWithinTransaction(externalTx, params);
+    }
+
     if (params.transactionKey) {
       const existingTx = await this.prisma.walletTransaction.findFirst({
         where: { walletId: params.walletId, transactionKey: params.transactionKey },
@@ -435,96 +431,20 @@ export class PrismaWalletRepository {
     }
 
     try {
-      return await this.prisma.$transaction(async (tx) => {
-        // 1. Idempotence Check
-        if (params.transactionKey) {
-          const existingTx = await tx.walletTransaction.findFirst({
-            where: { walletId: params.walletId, transactionKey: params.transactionKey },
-          });
-          if (existingTx) {
-            const reservation = await tx.walletReservation.findFirst({
-              where: { walletId: params.walletId, createdByTransactionId: existingTx.id },
-            });
-            if (reservation) {
-              return {
-                transaction: this.mapTransaction(existingTx),
-                reservation: this.mapReservation(reservation),
-              };
-            }
-          }
-        }
-
-        // 2. Lock & Check Balance
-        const balance = await tx.walletBalance.findUnique({
-          where: { walletId_currency: { walletId: params.walletId, currency } },
-        });
-
-        if (!balance || balance.availableCents < amountBigInt) {
-          throw new ValidationError(
-            `Insufficient available balance in ${currency} for reservation: requested ${params.amountCents}, available ${balance ? fromSafeBigIntCents(balance.availableCents) : 0}`
-          );
-        }
-
-        // 3. Move from Available to Reserved
-        await tx.walletBalance.update({
-          where: { walletId_currency: { walletId: params.walletId, currency } },
-          data: {
-            availableCents: { decrement: amountBigInt },
-            reservedCents: { increment: amountBigInt },
-          },
-        });
-
-        // 4. Create Hold Transaction
-        const transaction = await tx.walletTransaction.create({
-          data: {
-            id: params.transactionId,
-            walletId: params.walletId,
-            currency,
-            amountCents: amountBigInt,
-            type: WalletTransactionType.RESERVATION_HOLD,
-            status: WalletTransactionStatus.SETTLED,
-            actorId: params.actorId,
-            transactionKey: params.transactionKey ?? null,
-            relatedEntityType: params.relatedEntityType ?? null,
-            relatedEntityId: params.relatedEntityId ?? null,
-            metadataJson: (params.metadata ?? {}) as Prisma.InputJsonValue,
-          },
-        });
-
-        // 5. Create Reservation (Option B enforce wallet_id = transaction.wallet_id)
-        const reservation = await tx.walletReservation.create({
-          data: {
-            id: params.reservationId,
-            walletId: params.walletId,
-            currency,
-            amountCents: amountBigInt,
-            status: WalletReservationStatus.ACTIVE,
-            relatedEntityType: params.relatedEntityType ?? null,
-            relatedEntityId: params.relatedEntityId ?? null,
-            createdByTransactionId: transaction.id,
-            closedByTransactionId: null,
-            metadataJson: (params.metadata ?? {}) as Prisma.InputJsonValue,
-          },
-        });
-
-        return {
-          transaction: this.mapTransaction(transaction),
-          reservation: this.mapReservation(reservation),
-        };
-      });
+      return await this.prisma.$transaction(async (tx) => this.reserveWithinTransaction(tx, params));
     } catch (err: any) {
       if (params.transactionKey && isTransactionKeyUniqueViolation(err)) {
         const winnerTx = await this.prisma.walletTransaction.findFirst({
           where: { walletId: params.walletId, transactionKey: params.transactionKey },
         });
         if (winnerTx) {
-          const winnerRes = await this.prisma.walletReservation.findFirst({
+          const reservation = await this.prisma.walletReservation.findFirst({
             where: { walletId: params.walletId, createdByTransactionId: winnerTx.id },
           });
-          if (winnerRes) {
+          if (reservation) {
             return {
               transaction: this.mapTransaction(winnerTx),
-              reservation: this.mapReservation(winnerRes),
+              reservation: this.mapReservation(reservation),
             };
           }
         }
@@ -533,7 +453,93 @@ export class PrismaWalletRepository {
     }
   }
 
-  async releaseReservation(params: ReleaseReservationParams): Promise<{ transaction: WalletTransactionDto; reservation: WalletReservationDto }> {
+  async reserveWithinTransaction(
+    tx: Prisma.TransactionClient,
+    params: ReserveWalletParams,
+  ): Promise<{ transaction: WalletTransactionDto; reservation: WalletReservationDto }> {
+    const amountBigInt = toSafeBigIntCents(params.amountCents);
+    const currency = validateCurrency(params.currency);
+
+    if (params.transactionKey) {
+      const existingTx = await tx.walletTransaction.findFirst({
+        where: { walletId: params.walletId, transactionKey: params.transactionKey },
+      });
+      if (existingTx) {
+        const reservation = await tx.walletReservation.findFirst({
+          where: { walletId: params.walletId, createdByTransactionId: existingTx.id },
+        });
+        if (reservation) {
+          return {
+            transaction: this.mapTransaction(existingTx),
+            reservation: this.mapReservation(reservation),
+          };
+        }
+      }
+    }
+
+    const balance = await tx.walletBalance.findUnique({
+      where: { walletId_currency: { walletId: params.walletId, currency } },
+    });
+
+    if (!balance || balance.availableCents < amountBigInt) {
+      throw new ValidationError(
+        `Insufficient available balance in ${currency} for reservation: requested ${params.amountCents}, available ${balance ? fromSafeBigIntCents(balance.availableCents) : 0}`
+      );
+    }
+
+    await tx.walletBalance.update({
+      where: { walletId_currency: { walletId: params.walletId, currency } },
+      data: {
+        availableCents: { decrement: amountBigInt },
+        reservedCents: { increment: amountBigInt },
+      },
+    });
+
+    const transaction = await tx.walletTransaction.create({
+      data: {
+        id: params.transactionId,
+        walletId: params.walletId,
+        currency,
+        amountCents: amountBigInt,
+        type: WalletTransactionType.RESERVATION_HOLD,
+        status: WalletTransactionStatus.SETTLED,
+        actorId: params.actorId,
+        transactionKey: params.transactionKey ?? null,
+        relatedEntityType: params.relatedEntityType ?? null,
+        relatedEntityId: params.relatedEntityId ?? null,
+        metadataJson: (params.metadata ?? {}) as Prisma.InputJsonValue,
+      },
+    });
+
+    const reservation = await tx.walletReservation.create({
+      data: {
+        id: params.reservationId,
+        walletId: params.walletId,
+        currency,
+        amountCents: amountBigInt,
+        status: WalletReservationStatus.ACTIVE,
+        relatedEntityType: params.relatedEntityType ?? null,
+        relatedEntityId: params.relatedEntityId ?? null,
+        createdByTransactionId: transaction.id,
+        closedByTransactionId: null,
+        metadataJson: (params.metadata ?? {}) as Prisma.InputJsonValue,
+      },
+    });
+
+    return {
+      transaction: this.mapTransaction(transaction),
+      reservation: this.mapReservation(reservation),
+    };
+  }
+
+  async releaseReservation(
+    params: ReleaseReservationParams,
+    externalTx?: Prisma.TransactionClient
+  ): Promise<{ transaction: WalletTransactionDto; reservation: WalletReservationDto }> {
+    if (externalTx) {
+      return this.releaseReservationWithinTransaction(externalTx, params);
+    }
+
     if (params.transactionKey) {
       const existingTx = await this.prisma.walletTransaction.findFirst({
         where: { walletId: params.walletId, transactionKey: params.transactionKey },
@@ -552,65 +558,7 @@ export class PrismaWalletRepository {
     }
 
     try {
-      return await this.prisma.$transaction(async (tx) => {
-        // 1. Fetch Reservation
-        const reservation = await tx.walletReservation.findUnique({
-          where: { id: params.reservationId },
-        });
-
-        if (!reservation) {
-          throw new WalletNotFoundError(`Reservation not found: ${params.reservationId}`);
-        }
-
-        // Invariant Check (Défense en profondeur)
-        if (reservation.walletId !== params.walletId) {
-          throw new ValidationError(`Cross-wallet invariant violation: reservation belongs to ${reservation.walletId}, operation on ${params.walletId}`);
-        }
-
-        if (reservation.status !== WalletReservationStatus.ACTIVE) {
-          throw new WalletConflictError(`Reservation is not active (current status: ${reservation.status})`);
-        }
-
-        // 2. Return Reserved to Available
-        await tx.walletBalance.update({
-          where: {
-            walletId_currency: { walletId: params.walletId, currency: reservation.currency },
-          },
-          data: {
-            reservedCents: { decrement: reservation.amountCents },
-            availableCents: { increment: reservation.amountCents },
-          },
-        });
-
-        // 3. Create Release Transaction
-        const transaction = await tx.walletTransaction.create({
-          data: {
-            id: params.transactionId,
-            walletId: params.walletId,
-            currency: reservation.currency,
-            amountCents: reservation.amountCents,
-            type: WalletTransactionType.RESERVATION_RELEASE,
-            status: WalletTransactionStatus.SETTLED,
-            actorId: params.actorId,
-            transactionKey: params.transactionKey ?? null,
-            metadataJson: (params.metadata ?? {}) as Prisma.InputJsonValue,
-          },
-        });
-
-        // 4. Close Reservation (Option B verifies same wallet_id)
-        const updatedReservation = await tx.walletReservation.update({
-          where: { id: reservation.id },
-          data: {
-            status: WalletReservationStatus.RELEASED,
-            closedByTransactionId: transaction.id,
-          },
-        });
-
-        return {
-          transaction: this.mapTransaction(transaction),
-          reservation: this.mapReservation(updatedReservation),
-        };
-      });
+      return await this.prisma.$transaction(async (tx) => this.releaseReservationWithinTransaction(tx, params));
     } catch (err: any) {
       if (params.transactionKey && isTransactionKeyUniqueViolation(err)) {
         const winnerTx = await this.prisma.walletTransaction.findFirst({
@@ -632,7 +580,89 @@ export class PrismaWalletRepository {
     }
   }
 
-  async captureReservation(params: CaptureReservationParams): Promise<{ transaction: WalletTransactionDto; reservation: WalletReservationDto }> {
+  async releaseReservationWithinTransaction(
+    tx: Prisma.TransactionClient,
+    params: ReleaseReservationParams,
+  ): Promise<{ transaction: WalletTransactionDto; reservation: WalletReservationDto }> {
+    if (params.transactionKey) {
+      const existingTx = await tx.walletTransaction.findFirst({
+        where: { walletId: params.walletId, transactionKey: params.transactionKey },
+      });
+      if (existingTx) {
+        const reservation = await tx.walletReservation.findUnique({
+          where: { id: params.reservationId },
+        });
+        if (reservation) {
+          return {
+            transaction: this.mapTransaction(existingTx),
+            reservation: this.mapReservation(reservation),
+          };
+        }
+      }
+    }
+
+    const reservation = await tx.walletReservation.findUnique({
+      where: { id: params.reservationId },
+    });
+
+    if (!reservation) {
+      throw new WalletNotFoundError(`Reservation not found: ${params.reservationId}`);
+    }
+
+    if (reservation.walletId !== params.walletId) {
+      throw new ValidationError(`Cross-wallet invariant violation: reservation belongs to ${reservation.walletId}, operation on ${params.walletId}`);
+    }
+
+    if (reservation.status !== WalletReservationStatus.ACTIVE) {
+      throw new WalletConflictError(`Reservation is not active (current status: ${reservation.status})`);
+    }
+
+    await tx.walletBalance.update({
+      where: {
+        walletId_currency: { walletId: params.walletId, currency: reservation.currency },
+      },
+      data: {
+        reservedCents: { decrement: reservation.amountCents },
+        availableCents: { increment: reservation.amountCents },
+      },
+    });
+
+    const transaction = await tx.walletTransaction.create({
+      data: {
+        id: params.transactionId,
+        walletId: params.walletId,
+        currency: reservation.currency,
+        amountCents: reservation.amountCents,
+        type: WalletTransactionType.RESERVATION_RELEASE,
+        status: WalletTransactionStatus.SETTLED,
+        actorId: params.actorId,
+        transactionKey: params.transactionKey ?? null,
+        metadataJson: (params.metadata ?? {}) as Prisma.InputJsonValue,
+      },
+    });
+
+    const updatedReservation = await tx.walletReservation.update({
+      where: { id: reservation.id },
+      data: {
+        status: WalletReservationStatus.RELEASED,
+        closedByTransactionId: transaction.id,
+      },
+    });
+
+    return {
+      transaction: this.mapTransaction(transaction),
+      reservation: this.mapReservation(updatedReservation),
+    };
+  }
+
+  async captureReservation(
+    params: CaptureReservationParams,
+    externalTx?: Prisma.TransactionClient
+  ): Promise<{ transaction: WalletTransactionDto; reservation: WalletReservationDto }> {
+    if (externalTx) {
+      return this.captureReservationWithinTransaction(externalTx, params);
+    }
+
     if (params.transactionKey) {
       const existingTx = await this.prisma.walletTransaction.findFirst({
         where: { walletId: params.walletId, transactionKey: params.transactionKey },
@@ -651,64 +681,7 @@ export class PrismaWalletRepository {
     }
 
     try {
-      return await this.prisma.$transaction(async (tx) => {
-        // 1. Fetch Reservation
-        const reservation = await tx.walletReservation.findUnique({
-          where: { id: params.reservationId },
-        });
-
-        if (!reservation) {
-          throw new WalletNotFoundError(`Reservation not found: ${params.reservationId}`);
-        }
-
-        // Invariant Check
-        if (reservation.walletId !== params.walletId) {
-          throw new ValidationError(`Cross-wallet invariant violation: reservation belongs to ${reservation.walletId}, operation on ${params.walletId}`);
-        }
-
-        if (reservation.status !== WalletReservationStatus.ACTIVE) {
-          throw new WalletConflictError(`Reservation is not active (current status: ${reservation.status})`);
-        }
-
-        // 2. Consume Reserved Balance (without returning to available)
-        await tx.walletBalance.update({
-          where: {
-            walletId_currency: { walletId: params.walletId, currency: reservation.currency },
-          },
-          data: {
-            reservedCents: { decrement: reservation.amountCents },
-          },
-        });
-
-        // 3. Create Capture Transaction
-        const transaction = await tx.walletTransaction.create({
-          data: {
-            id: params.transactionId,
-            walletId: params.walletId,
-            currency: reservation.currency,
-            amountCents: reservation.amountCents,
-            type: WalletTransactionType.RESERVATION_CAPTURE,
-            status: WalletTransactionStatus.SETTLED,
-            actorId: params.actorId,
-            transactionKey: params.transactionKey ?? null,
-            metadataJson: (params.metadata ?? {}) as Prisma.InputJsonValue,
-          },
-        });
-
-        // 4. Close Reservation (Option B)
-        const updatedReservation = await tx.walletReservation.update({
-          where: { id: reservation.id },
-          data: {
-            status: WalletReservationStatus.CAPTURED,
-            closedByTransactionId: transaction.id,
-          },
-        });
-
-        return {
-          transaction: this.mapTransaction(transaction),
-          reservation: this.mapReservation(updatedReservation),
-        };
-      });
+      return await this.prisma.$transaction(async (tx) => this.captureReservationWithinTransaction(tx, params));
     } catch (err: any) {
       if (params.transactionKey && isTransactionKeyUniqueViolation(err)) {
         const winnerTx = await this.prisma.walletTransaction.findFirst({
@@ -730,7 +703,88 @@ export class PrismaWalletRepository {
     }
   }
 
-  async rollbackTransaction(params: RollbackTransactionParams): Promise<WalletTransactionDto> {
+  async captureReservationWithinTransaction(
+    tx: Prisma.TransactionClient,
+    params: CaptureReservationParams,
+  ): Promise<{ transaction: WalletTransactionDto; reservation: WalletReservationDto }> {
+    if (params.transactionKey) {
+      const existingTx = await tx.walletTransaction.findFirst({
+        where: { walletId: params.walletId, transactionKey: params.transactionKey },
+      });
+      if (existingTx) {
+        const reservation = await tx.walletReservation.findUnique({
+          where: { id: params.reservationId },
+        });
+        if (reservation) {
+          return {
+            transaction: this.mapTransaction(existingTx),
+            reservation: this.mapReservation(reservation),
+          };
+        }
+      }
+    }
+
+    const reservation = await tx.walletReservation.findUnique({
+      where: { id: params.reservationId },
+    });
+
+    if (!reservation) {
+      throw new WalletNotFoundError(`Reservation not found: ${params.reservationId}`);
+    }
+
+    if (reservation.walletId !== params.walletId) {
+      throw new ValidationError(`Cross-wallet invariant violation: reservation belongs to ${reservation.walletId}, operation on ${params.walletId}`);
+    }
+
+    if (reservation.status !== WalletReservationStatus.ACTIVE) {
+      throw new WalletConflictError(`Reservation is not active (current status: ${reservation.status})`);
+    }
+
+    await tx.walletBalance.update({
+      where: {
+        walletId_currency: { walletId: params.walletId, currency: reservation.currency },
+      },
+      data: {
+        reservedCents: { decrement: reservation.amountCents },
+      },
+    });
+
+    const transaction = await tx.walletTransaction.create({
+      data: {
+        id: params.transactionId,
+        walletId: params.walletId,
+        currency: reservation.currency,
+        amountCents: reservation.amountCents,
+        type: WalletTransactionType.RESERVATION_CAPTURE,
+        status: WalletTransactionStatus.SETTLED,
+        actorId: params.actorId,
+        transactionKey: params.transactionKey ?? null,
+        metadataJson: (params.metadata ?? {}) as Prisma.InputJsonValue,
+      },
+    });
+
+    const updatedReservation = await tx.walletReservation.update({
+      where: { id: reservation.id },
+      data: {
+        status: WalletReservationStatus.CAPTURED,
+        closedByTransactionId: transaction.id,
+      },
+    });
+
+    return {
+      transaction: this.mapTransaction(transaction),
+      reservation: this.mapReservation(updatedReservation),
+    };
+  }
+
+  async rollbackTransaction(
+    params: RollbackTransactionParams,
+    externalTx?: Prisma.TransactionClient
+  ): Promise<WalletTransactionDto> {
+    if (externalTx) {
+      return this.rollbackTransactionWithinTransaction(externalTx, params);
+    }
+
     if (params.transactionKey) {
       const existingTx = await this.prisma.walletTransaction.findFirst({
         where: { walletId: params.walletId, transactionKey: params.transactionKey },
@@ -741,94 +795,7 @@ export class PrismaWalletRepository {
     }
 
     try {
-      return await this.prisma.$transaction(async (tx) => {
-        // 1. Fetch Target Transaction
-        const targetTx = await tx.walletTransaction.findUnique({
-          where: { id: params.targetTransactionId },
-        });
-
-        if (!targetTx) {
-          throw new WalletNotFoundError(`Target transaction not found: ${params.targetTransactionId}`);
-        }
-
-        // Invariant Check (Défense en profondeur)
-        if (targetTx.walletId !== params.walletId) {
-          throw new ValidationError(`Cross-wallet invariant violation: target transaction belongs to ${targetTx.walletId}, operation on ${params.walletId}`);
-        }
-
-        if (targetTx.type === WalletTransactionType.ROLLBACK) {
-          throw new WalletConflictError(`Cannot rollback a rollback transaction: ${targetTx.id}`);
-        }
-
-        // Check if already rolled back
-        const existingReversal = await tx.walletTransaction.findFirst({
-          where: {
-            walletId: params.walletId,
-            reversalOfTransactionId: targetTx.id,
-          },
-        });
-
-        if (existingReversal) {
-          throw new WalletConflictError(`Transaction ${targetTx.id} has already been reversed by ${existingReversal.id}`);
-        }
-
-        // 2. Reverse Balances based on Transaction Type
-        if (targetTx.type === WalletTransactionType.CREDIT) {
-          // Rollback Credit -> Deduct from available
-          const balance = await tx.walletBalance.findUnique({
-            where: { walletId_currency: { walletId: params.walletId, currency: targetTx.currency } },
-          });
-          if (!balance || balance.availableCents < targetTx.amountCents) {
-            throw new ValidationError(`Insufficient available balance to rollback credit: requires ${fromSafeBigIntCents(targetTx.amountCents)}`);
-          }
-          await tx.walletBalance.update({
-            where: { walletId_currency: { walletId: params.walletId, currency: targetTx.currency } },
-            data: { availableCents: { decrement: targetTx.amountCents } },
-          });
-        } else if (targetTx.type === WalletTransactionType.DEBIT) {
-          // Rollback Debit -> Restore to available
-          await tx.walletBalance.update({
-            where: { walletId_currency: { walletId: params.walletId, currency: targetTx.currency } },
-            data: { availableCents: { increment: targetTx.amountCents } },
-          });
-        } else if (targetTx.type === WalletTransactionType.RESERVATION_HOLD) {
-          // Rollback active reservation
-          const res = await tx.walletReservation.findFirst({
-            where: { walletId: params.walletId, createdByTransactionId: targetTx.id },
-          });
-          if (res && res.status === WalletReservationStatus.ACTIVE) {
-            await tx.walletBalance.update({
-              where: { walletId_currency: { walletId: params.walletId, currency: res.currency } },
-              data: {
-                reservedCents: { decrement: res.amountCents },
-                availableCents: { increment: res.amountCents },
-              },
-            });
-            await tx.walletReservation.update({
-              where: { id: res.id },
-              data: { status: WalletReservationStatus.ROLLED_BACK },
-            });
-          }
-        }
-
-        // 3. Create Rollback Transaction (Option B composite foreign key ensures same wallet_id)
-        const rollbackTx = await tx.walletTransaction.create({
-          data: {
-            id: params.rollbackTransactionId,
-            walletId: params.walletId,
-            currency: targetTx.currency,
-            amountCents: targetTx.amountCents,
-            type: WalletTransactionType.ROLLBACK,
-            status: WalletTransactionStatus.SETTLED,
-            actorId: params.actorId,
-            transactionKey: params.transactionKey ?? null,
-            reversalOfTransactionId: targetTx.id,
-            metadataJson: (params.metadata ?? {}) as Prisma.InputJsonValue,
-          },
-        });
-
-        return this.mapTransaction(rollbackTx);
-      });
+      return await this.prisma.$transaction(async (tx) => this.rollbackTransactionWithinTransaction(tx, params));
     } catch (err: any) {
       if (params.transactionKey && isTransactionKeyUniqueViolation(err)) {
         const winnerTx = await this.prisma.walletTransaction.findFirst({
@@ -840,6 +807,99 @@ export class PrismaWalletRepository {
       }
       throw err;
     }
+  }
+
+  async rollbackTransactionWithinTransaction(
+    tx: Prisma.TransactionClient,
+    params: RollbackTransactionParams,
+  ): Promise<WalletTransactionDto> {
+    if (params.transactionKey) {
+      const existingTx = await tx.walletTransaction.findFirst({
+        where: { walletId: params.walletId, transactionKey: params.transactionKey },
+      });
+      if (existingTx) {
+        return this.mapTransaction(existingTx);
+      }
+    }
+
+    const targetTx = await tx.walletTransaction.findUnique({
+      where: { id: params.targetTransactionId },
+    });
+
+    if (!targetTx) {
+      throw new WalletNotFoundError(`Target transaction not found: ${params.targetTransactionId}`);
+    }
+
+    if (targetTx.walletId !== params.walletId) {
+      throw new ValidationError(`Cross-wallet invariant violation: target transaction belongs to ${targetTx.walletId}, operation on ${params.walletId}`);
+    }
+
+    if (targetTx.type === WalletTransactionType.ROLLBACK) {
+      throw new WalletConflictError(`Cannot rollback a rollback transaction: ${targetTx.id}`);
+    }
+
+    const existingReversal = await tx.walletTransaction.findFirst({
+      where: {
+        walletId: params.walletId,
+        reversalOfTransactionId: targetTx.id,
+      },
+    });
+
+    if (existingReversal) {
+      throw new WalletConflictError(`Transaction ${targetTx.id} has already been reversed by ${existingReversal.id}`);
+    }
+
+    if (targetTx.type === WalletTransactionType.CREDIT) {
+      const balance = await tx.walletBalance.findUnique({
+        where: { walletId_currency: { walletId: params.walletId, currency: targetTx.currency } },
+      });
+      if (!balance || balance.availableCents < targetTx.amountCents) {
+        throw new ValidationError(`Insufficient available balance to rollback credit: requires ${fromSafeBigIntCents(targetTx.amountCents)}`);
+      }
+      await tx.walletBalance.update({
+        where: { walletId_currency: { walletId: params.walletId, currency: targetTx.currency } },
+        data: { availableCents: { decrement: targetTx.amountCents } },
+      });
+    } else if (targetTx.type === WalletTransactionType.DEBIT) {
+      await tx.walletBalance.update({
+        where: { walletId_currency: { walletId: params.walletId, currency: targetTx.currency } },
+        data: { availableCents: { increment: targetTx.amountCents } },
+      });
+    } else if (targetTx.type === WalletTransactionType.RESERVATION_HOLD) {
+      const res = await tx.walletReservation.findFirst({
+        where: { walletId: params.walletId, createdByTransactionId: targetTx.id },
+      });
+      if (res && res.status === WalletReservationStatus.ACTIVE) {
+        await tx.walletBalance.update({
+          where: { walletId_currency: { walletId: params.walletId, currency: res.currency } },
+          data: {
+            reservedCents: { decrement: res.amountCents },
+            availableCents: { increment: res.amountCents },
+          },
+        });
+        await tx.walletReservation.update({
+          where: { id: res.id },
+          data: { status: WalletReservationStatus.ROLLED_BACK },
+        });
+      }
+    }
+
+    const rollbackTx = await tx.walletTransaction.create({
+      data: {
+        id: params.rollbackTransactionId,
+        walletId: params.walletId,
+        currency: targetTx.currency,
+        amountCents: targetTx.amountCents,
+        type: WalletTransactionType.ROLLBACK,
+        status: WalletTransactionStatus.SETTLED,
+        actorId: params.actorId,
+        transactionKey: params.transactionKey ?? null,
+        reversalOfTransactionId: targetTx.id,
+        metadataJson: (params.metadata ?? {}) as Prisma.InputJsonValue,
+      },
+    });
+
+    return this.mapTransaction(rollbackTx);
   }
 
   private mapTransaction(tx: {

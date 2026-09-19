@@ -37,7 +37,7 @@ export class PrismaOrderRepository implements OrderRepository {
     private readonly auditRepository?: AuditLogRepository,
   ) {}
 
-  async create(params: CreateOrderParams): Promise<Order> {
+  async create(params: CreateOrderParams, externalTx?: Prisma.TransactionClient): Promise<Order> {
     const orderId = params.id ?? randomUUID();
     const orderNumber = params.orderNumber ?? orderId;
     const now = new Date();
@@ -56,7 +56,7 @@ export class PrismaOrderRepository implements OrderRepository {
       throw new ValidationError('La devise de commande doit utiliser un code à trois caractères');
     }
 
-    return await this.prisma.$transaction(async (tx) => {
+    const execute = async (tx: Prisma.TransactionClient): Promise<Order> => {
       const initialTransitionId = randomUUID();
 
       const orderRow = await tx.order.create({
@@ -113,7 +113,13 @@ export class PrismaOrderRepository implements OrderRepository {
       }
 
       return this.mapOrder(orderRow);
-    });
+    };
+
+    if (externalTx) {
+      return await execute(externalTx);
+    }
+
+    return await this.prisma.$transaction(async (tx) => execute(tx));
   }
 
   async getById(orderId: string): Promise<Order | null> {
@@ -148,8 +154,8 @@ export class PrismaOrderRepository implements OrderRepository {
    * verifies state machine transition, appends transition,
    * writes audit log, and updates currentStep and updatedAt atomically.
    */
-  async advanceWithLock(params: AdvanceOrderTransactionalParams): Promise<Order> {
-    return await this.prisma.$transaction(async (tx) => {
+  async advanceWithLock(params: AdvanceOrderTransactionalParams, externalTx?: Prisma.TransactionClient): Promise<Order> {
+    const execute = async (tx: Prisma.TransactionClient): Promise<Order> => {
       // 1. Row Lock (SELECT ... FOR UPDATE)
       const lockedRows = await tx.$queryRaw<Array<{
         id: string;
@@ -225,7 +231,7 @@ export class PrismaOrderRepository implements OrderRepository {
 
       // 2. Execute beforeCommit handler under SELECT FOR UPDATE lock
       if (params.beforeCommit) {
-        await params.beforeCommit(currentOrder);
+        await params.beforeCommit(currentOrder, tx);
       }
 
       const now = new Date();
@@ -280,7 +286,13 @@ export class PrismaOrderRepository implements OrderRepository {
       }
 
       return this.mapOrder(updatedOrderRow);
-    });
+    };
+
+    if (externalTx) {
+      return await execute(externalTx);
+    }
+
+    return await this.prisma.$transaction(async (tx) => execute(tx));
   }
 
   async getTransitionHistory(orderId: string): Promise<readonly OrderTransition[]> {
