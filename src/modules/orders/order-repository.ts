@@ -30,13 +30,13 @@ export interface AdvanceOrderTransactionalParams {
   readonly toStep: OrderStep;
   readonly actorId: string;
   readonly metadata?: Record<string, unknown>;
-  readonly beforeCommit?: (order: Order) => Promise<void> | void;
+  readonly beforeCommit?: (order: Order, tx?: unknown) => Promise<void> | void;
 }
 
 export interface OrderRepository {
-  create(params: CreateOrderParams): Promise<Order>;
+  create(params: CreateOrderParams, tx?: unknown): Promise<Order>;
   getById(orderId: string): Promise<Order | null>;
   getByOrderNumber(orderNumber: string): Promise<Order | null>;
-  advanceWithLock(params: AdvanceOrderTransactionalParams): Promise<Order>;
+  advanceWithLock(params: AdvanceOrderTransactionalParams, tx?: unknown): Promise<Order>;
   getTransitionHistory(orderId: string): Promise<readonly OrderTransition[]>;
 }
