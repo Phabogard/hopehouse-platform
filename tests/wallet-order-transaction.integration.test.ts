@@ -365,14 +365,7 @@ test('Wallet <-> Order transaction: D. Concurrence PostgreSQL & E. Insufficient 
           beforeCommit: async (lockedOrder, innerTx) => {
             const txClient = innerTx as any;
 
-            // Lock balance row FOR UPDATE before debit check
-            await txClient.$queryRaw`
-              SELECT wallet_id, currency, available_cents, reserved_cents
-              FROM wallet_balances
-              WHERE wallet_id = ${wallet.id} AND currency = 'EUR'
-              FOR UPDATE
-            `;
-
+            // Repository must acquire the wallet balance row lock itself.
             await walletRepo.debitWithinTransaction(txClient, {
               transactionId: `tx-debit-${randomUUID()}`,
               walletId: wallet.id,

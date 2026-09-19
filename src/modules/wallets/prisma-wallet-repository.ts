@@ -369,13 +369,22 @@ export class PrismaWalletRepository {
       }
     }
 
-    const balance = await tx.walletBalance.findUnique({
-      where: { walletId_currency: { walletId: params.walletId, currency } },
-    });
+    const lockedBalance = await tx.$queryRaw<Array<{
+      wallet_id: string;
+      currency: string;
+      available_cents: bigint;
+      reserved_cents: bigint;
+    }>>`
+      SELECT wallet_id, currency, available_cents, reserved_cents
+      FROM wallet_balances
+      WHERE wallet_id = ${params.walletId} AND currency = ${currency}
+      FOR UPDATE
+    `;
 
-    if (!balance || balance.availableCents < amountBigInt) {
+    const balance = lockedBalance[0];
+    if (!balance || balance.available_cents < amountBigInt) {
       throw new ValidationError(
-        `Insufficient available balance in ${currency}: requested ${params.amountCents}, available ${balance ? fromSafeBigIntCents(balance.availableCents) : 0}`
+        `Insufficient available balance in ${currency}: requested ${params.amountCents}, available ${balance ? fromSafeBigIntCents(balance.available_cents) : 0}`
       );
     }
 
@@ -477,13 +486,22 @@ export class PrismaWalletRepository {
       }
     }
 
-    const balance = await tx.walletBalance.findUnique({
-      where: { walletId_currency: { walletId: params.walletId, currency } },
-    });
+    const lockedBalance = await tx.$queryRaw<Array<{
+      wallet_id: string;
+      currency: string;
+      available_cents: bigint;
+      reserved_cents: bigint;
+    }>>`
+      SELECT wallet_id, currency, available_cents, reserved_cents
+      FROM wallet_balances
+      WHERE wallet_id = ${params.walletId} AND currency = ${currency}
+      FOR UPDATE
+    `;
 
-    if (!balance || balance.availableCents < amountBigInt) {
+    const balance = lockedBalance[0];
+    if (!balance || balance.available_cents < amountBigInt) {
       throw new ValidationError(
-        `Insufficient available balance in ${currency} for reservation: requested ${params.amountCents}, available ${balance ? fromSafeBigIntCents(balance.availableCents) : 0}`
+        `Insufficient available balance in ${currency} for reservation: requested ${params.amountCents}, available ${balance ? fromSafeBigIntCents(balance.available_cents) : 0}`
       );
     }
 
@@ -850,10 +868,20 @@ export class PrismaWalletRepository {
     }
 
     if (targetTx.type === WalletTransactionType.CREDIT) {
-      const balance = await tx.walletBalance.findUnique({
-        where: { walletId_currency: { walletId: params.walletId, currency: targetTx.currency } },
-      });
-      if (!balance || balance.availableCents < targetTx.amountCents) {
+      const lockedBalance = await tx.$queryRaw<Array<{
+        wallet_id: string;
+        currency: string;
+        available_cents: bigint;
+        reserved_cents: bigint;
+      }>>`
+        SELECT wallet_id, currency, available_cents, reserved_cents
+        FROM wallet_balances
+        WHERE wallet_id = ${params.walletId} AND currency = ${targetTx.currency}
+        FOR UPDATE
+      `;
+
+      const balance = lockedBalance[0];
+      if (!balance || balance.available_cents < targetTx.amountCents) {
         throw new ValidationError(`Insufficient available balance to rollback credit: requires ${fromSafeBigIntCents(targetTx.amountCents)}`);
       }
       await tx.walletBalance.update({
