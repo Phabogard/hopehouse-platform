@@ -54,7 +54,7 @@ export async function createPrismaHopeHouseServer(options: PrismaHopeHouseServer
   const policy = await resolvePrismaAuthSecurityPolicy(client, authOptions.policy);
   const authRuntime = new PrismaAuthRuntimeContext(client, { ...authOptions, policy });
   const auditRepository = new PrismaAuditLogRepository(client);
-  const audit = new AuditLogService(new PrismaAuditLogRepository(client));
+  const audit = new AuditLogService(auditRepository);
   const catalogue = new CatalogueService(new PrismaCatalogRepository(client));
   const idempotency = new PostgresIdempotencyStore(client);
   const walletRepository = new PrismaWalletRepository(client);
