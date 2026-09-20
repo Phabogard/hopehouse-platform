@@ -629,3 +629,123 @@ test('Wallet <-> Order transaction: G. payment handler failure rolls back reserv
     await client.$disconnect();
   }
 });
+
+
+test('Wallet <-> Order transaction: H. concurrent payment transitions on one wallet serialize at the balance lock', { skip: databaseUrl === undefined }, async () => {
+  const client = integrationClient();
+  const orderRepo = new PrismaOrderRepository(client);
+  const walletRepo = new PrismaWalletRepository(client);
+
+  try {
+    const { serviceId } = await createTestServiceAndCatalogItem(client);
+    const requesterId = `u-${randomUUID()}`;
+    const wallet = await walletRepo.createWallet({ id: `w-${randomUUID()}`, ownerType: 'USER', ownerId: requesterId });
+
+    await walletRepo.credit({
+      transactionId: `tx-init-${randomUUID()}`,
+      walletId: wallet.id,
+      currency: 'EUR',
+      amountCents: 10_000,
+      actorId: 'system',
+    });
+
+    const orders = await Promise.all(
+      [1, 2].map(() =>
+        orderRepo.create({
+          serviceDefinitionId: serviceId,
+          mode: 'semi_automatic',
+          requesterActorId: requesterId,
+          amountCents: 6_000,
+          currency: 'EUR',
+        }),
+      ),
+    );
+
+    const { OrderEngine } = await import('../src/modules/orders/order-engine.js');
+    const makeEngine = () =>
+      new OrderEngine({
+        payment: async ({ order: lockedOrder, actorId, tx }) => {
+          assert.notEqual(tx, undefined, 'payment handler must receive the shared transaction');
+          const txClient = tx as any;
+
+          await walletRepo.reserveWithinTransaction(txClient, {
+            reservationId: randomUUID(),
+            transactionId: randomUUID(),
+            walletId: wallet.id,
+            currency: lockedOrder.monetaryIntent!.currency,
+            amountCents: lockedOrder.monetaryIntent!.amountCents,
+            actorId,
+            transactionKey: `order:${lockedOrder.id}:payment`,
+            relatedEntityType: 'order',
+            relatedEntityId: lockedOrder.id,
+            metadata: { orderId: lockedOrder.id, step: 'payment' },
+          });
+
+          await new PostgresOutboxStore(txClient).append({
+            eventId: randomUUID(),
+            eventType: 'order.payment_reserved',
+            schemaVersion: 1,
+            occurredAt: new Date().toISOString(),
+            correlationId: lockedOrder.id,
+            causationId: null,
+            aggregateType: 'order',
+            aggregateId: lockedOrder.id,
+            payload: {
+              orderId: lockedOrder.id,
+              walletId: wallet.id,
+              amountCents: lockedOrder.monetaryIntent!.amountCents,
+              currency: lockedOrder.monetaryIntent!.currency,
+              actorId,
+            },
+          });
+        },
+      }, orderRepo);
+
+    const validatedOrders = await Promise.all(
+      orders.map((order) =>
+        makeEngine().advance({
+          order,
+          actorId: requesterId,
+          toStep: 'validation',
+        }),
+      ),
+    );
+
+    const results = await Promise.allSettled(
+      validatedOrders.map((order) =>
+        makeEngine().advance({
+          order,
+          actorId: requesterId,
+          toStep: 'payment',
+        }),
+      ),
+    );
+
+    const fulfilled = results.filter((result) => result.status === 'fulfilled');
+    const rejected = results.filter((result) => result.status === 'rejected');
+
+    assert.equal(fulfilled.length, 1);
+    assert.equal(rejected.length, 1);
+    assert.equal((rejected[0] as PromiseRejectedResult).reason instanceof ValidationError, true);
+
+    const persistedOrders = await Promise.all(orders.map((order) => orderRepo.getById(order.id)));
+    assert.equal(persistedOrders.filter((order) => order?.currentStep === 'payment').length, 1);
+    assert.equal(persistedOrders.filter((order) => order?.currentStep === 'validation').length, 1);
+
+    const walletState = await walletRepo.getWalletById(wallet.id);
+    assert.equal(walletState?.balances[0].availableCents, 4_000);
+    assert.equal(walletState?.balances[0].reservedCents, 6_000);
+
+    const reservationCount = await client.walletTransaction.count({
+      where: { walletId: wallet.id, type: 'RESERVATION_HOLD' },
+    });
+    assert.equal(reservationCount, 1);
+
+    const outboxCount = await client.outboxMessage.count({
+      where: { aggregateId: { in: orders.map((order) => order.id) }, eventType: 'order.payment_reserved' },
+    });
+    assert.equal(outboxCount, 1);
+  } finally {
+    await client.$disconnect();
+  }
+});
