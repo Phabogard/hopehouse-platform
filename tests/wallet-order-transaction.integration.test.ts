@@ -506,7 +506,7 @@ test('Wallet <-> Order transaction: F. OrderEngine payment handler uses the lock
     assert.equal(walletState?.balances[0].reservedCents, 4000);
 
     const reservationTxs = await client.walletTransaction.findMany({
-      where: { walletId: wallet.id, type: 'reserve' },
+      where: { walletId: wallet.id, type: 'RESERVATION_HOLD' },
     });
     assert.equal(reservationTxs.length, 1);
     assert.equal(reservationTxs[0]?.amountCents, 4000);
