@@ -52,10 +52,17 @@ export class OrderEngine {
           const replay = await this.repository.getById(existing.resultReference);
           if (replay) return replay;
         }
+
         const orderId = randomUUID();
         return await this.createPersistence.prisma.$transaction(async (tx) => {
           const store = this.createPersistence!.createIdempotencyStore(tx);
-          const won = await store.save({ key: idempotencyKey, operation, resultReference: orderId, createdAt: new Date().toISOString() });
+          const won = await store.save({
+            key: idempotencyKey,
+            operation,
+            resultReference: orderId,
+            createdAt: new Date().toISOString(),
+          });
+
           if (!won) {
             const record = await store.find(idempotencyKey, operation);
             if (record?.resultReference) {
@@ -64,8 +71,23 @@ export class OrderEngine {
             }
             throw new Error('Idempotency claim won by another request but no order result is available');
           }
+
           return await this.repository!.create({
             id: orderId,
+            serviceDefinitionId: input.serviceDefinitionId,
+            catalogItemId: input.catalogItemId,
+            mode: input.mode,
+            requesterActorId: input.requesterActorId,
+            beneficiaryId: input.beneficiaryId,
+            channel: input.channel,
+            amountCents: input.monetaryIntent?.amountCents,
+            currency: input.monetaryIntent?.currency,
+            metadata: input.metadata,
+          }, tx);
+        });
+      }
+
+      return await this.repository.create({
         serviceDefinitionId: input.serviceDefinitionId,
         catalogItemId: input.catalogItemId,
         mode: input.mode,
@@ -75,9 +97,9 @@ export class OrderEngine {
         amountCents: input.monetaryIntent?.amountCents,
         currency: input.monetaryIntent?.currency,
         metadata: input.metadata,
-          }, tx);
-        });
+      });
     }
+
     return createOrder(input);
   }
 
