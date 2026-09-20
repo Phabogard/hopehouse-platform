@@ -413,3 +413,109 @@ test('Wallet <-> Order transaction: D. Concurrence PostgreSQL & E. Insufficient 
     await client2.$disconnect();
   }
 });
+
+
+test('Wallet <-> Order transaction: F. OrderEngine payment handler uses the locked transaction and commits reservation + outbox atomically', { skip: databaseUrl === undefined }, async () => {
+  const client = integrationClient();
+  const orderRepo = new PrismaOrderRepository(client);
+  const walletRepo = new PrismaWalletRepository(client);
+
+  try {
+    const { serviceId } = await createTestServiceAndCatalogItem(client);
+    const requesterId = `u-${randomUUID()}`;
+    const wallet = await walletRepo.createWallet({ id: `w-${randomUUID()}`, ownerType: 'USER', ownerId: requesterId });
+
+    await walletRepo.credit({
+      transactionId: `tx-init-${randomUUID()}`,
+      walletId: wallet.id,
+      currency: 'EUR',
+      amountCents: 10000,
+      actorId: 'system',
+    });
+
+    const order = await orderRepo.create({
+      serviceDefinitionId: serviceId,
+      mode: 'semi_automatic',
+      requesterActorId: requesterId,
+      amountCents: 4000,
+      currency: 'EUR',
+    });
+
+    const { OrderEngine } = await import('../src/modules/orders/order-engine.js');
+
+    const engine = new OrderEngine({
+      payment: async ({ order: lockedOrder, actorId, tx }) => {
+        assert.notEqual(tx, undefined, 'OrderEngine payment handler must receive the repository transaction');
+
+        const txClient = tx as any;
+        const reservationId = randomUUID();
+        const transactionId = randomUUID();
+
+        await walletRepo.reserveWithinTransaction(txClient, {
+          reservationId,
+          transactionId,
+          walletId: wallet.id,
+          currency: lockedOrder.monetaryIntent!.currency,
+          amountCents: lockedOrder.monetaryIntent!.amountCents,
+          actorId,
+          transactionKey: `order:${lockedOrder.id}:payment`,
+          relatedEntityType: 'order',
+          relatedEntityId: lockedOrder.id,
+          metadata: { orderId: lockedOrder.id, step: 'payment' },
+        });
+
+        await new PostgresOutboxStore(txClient).append({
+          eventId: randomUUID(),
+          eventType: 'order.payment_reserved',
+          schemaVersion: 1,
+          occurredAt: new Date().toISOString(),
+          correlationId: lockedOrder.id,
+          causationId: null,
+          aggregateType: 'order',
+          aggregateId: lockedOrder.id,
+          payload: {
+            orderId: lockedOrder.id,
+            walletId: wallet.id,
+            amountCents: lockedOrder.monetaryIntent!.amountCents,
+            currency: lockedOrder.monetaryIntent!.currency,
+            actorId,
+          },
+        });
+
+        const persistedTx = await txClient.walletTransaction.findUnique({ where: { id: transactionId } });
+        assert.notEqual(persistedTx, null, 'Reservation transaction must be visible inside the shared transaction');
+      },
+    }, orderRepo);
+
+    const validatedOrder = await engine.advance({
+      order,
+      actorId: requesterId,
+      toStep: 'validation',
+    });
+
+    const paidOrder = await engine.advance({
+      order: validatedOrder,
+      actorId: requesterId,
+      toStep: 'payment',
+    });
+
+    assert.equal(paidOrder.currentStep, 'payment');
+
+    const walletState = await walletRepo.getWalletById(wallet.id);
+    assert.equal(walletState?.balances[0].availableCents, 6000);
+    assert.equal(walletState?.balances[0].reservedCents, 4000);
+
+    const reservationTxs = await client.walletTransaction.findMany({
+      where: { walletId: wallet.id, type: 'reserve' },
+    });
+    assert.equal(reservationTxs.length, 1);
+    assert.equal(reservationTxs[0]?.amountCents, 4000);
+
+    const outboxMessages = await client.outboxMessage.findMany({
+      where: { aggregateId: order.id, eventType: 'order.payment_reserved' },
+    });
+    assert.equal(outboxMessages.length, 1);
+  } finally {
+    await client.$disconnect();
+  }
+});
