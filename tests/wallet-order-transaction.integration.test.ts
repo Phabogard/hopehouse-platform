@@ -7,6 +7,8 @@ import { PrismaWalletRepository } from '../src/modules/wallets/prisma-wallet-rep
 import { PrismaAuditLogRepository } from '../src/infrastructure/prisma/audit-log-repository.js';
 import { PostgresOutboxStore } from '../src/infrastructure/outbox/postgres-outbox-store.js';
 import { ValidationError } from '../src/core/errors.js';
+import { OrderEngine } from '../src/modules/orders/order-engine.js';
+import { PostgresIdempotencyStore } from '../src/infrastructure/prisma/idempotency-store.js';
 
 const databaseUrl = process.env.DATABASE_URL;
 
@@ -745,6 +747,63 @@ test('Wallet <-> Order transaction: H. concurrent payment transitions on one wal
       where: { aggregateId: { in: orders.map((order) => order.id) }, eventType: 'order.payment_reserved' },
     });
     assert.equal(outboxCount, 1);
+  } finally {
+    await client.$disconnect();
+  }
+});
+
+
+test('Wallet <-> Order transaction: I. repeated transition with same Idempotency-Key replays the persisted order without a second transition', { skip: databaseUrl === undefined }, async () => {
+  const client = integrationClient();
+  try {
+    const { serviceId, catalogItemId } = await createTestServiceAndCatalogItem(client);
+    const repository = new PrismaOrderRepository(client);
+    const idempotencyStore = new PostgresIdempotencyStore(client);
+    const engine = new OrderEngine({}, repository, {
+      prisma: client,
+      idempotencyStore,
+      createIdempotencyStore: (tx) => new PostgresIdempotencyStore(tx as any),
+    });
+
+    const order = await repository.create({
+      serviceDefinitionId: serviceId,
+      catalogItemId,
+      mode: 'manual',
+      requesterActorId: `actor-${randomUUID()}`,
+      metadata: {},
+    });
+
+    const key = `order-transition-${randomUUID()}`;
+    const first = await engine.advance({
+      order,
+      actorId: order.requester.id,
+      toStep: 'validation',
+      idempotencyKey: key,
+    });
+
+    const replay = await engine.advance({
+      order,
+      actorId: order.requester.id,
+      toStep: 'validation',
+      idempotencyKey: key,
+    });
+
+    assert.equal(replay.id, first.id);
+    assert.equal(replay.currentStep, 'validation');
+
+    const transitions = await client.orderTransition.count({
+      where: { orderId: order.id, toStep: 'validation' },
+    });
+    assert.equal(transitions, 1);
+
+    const records = await client.$queryRaw<Array<{ key: string; operation: string; result_reference: string | null }>>`
+      SELECT "key", "operation", "result_reference"
+      FROM "idempotency_records"
+      WHERE "key" = ${key}
+    `;
+    assert.equal(records.length, 1);
+    assert.equal(records[0]?.operation, `order.advance:${order.id}:validation`);
+    assert.equal(records[0]?.result_reference, order.id);
   } finally {
     await client.$disconnect();
   }
