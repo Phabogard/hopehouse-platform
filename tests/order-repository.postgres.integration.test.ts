@@ -5,6 +5,7 @@ import test from 'node:test';
 import { PrismaOrderRepository } from '../src/infrastructure/prisma/order-repository.js';
 import { OrderEngine } from '../src/modules/orders/order-engine.js';
 import { ValidationError } from '../src/core/errors.js';
+import { PostgresIdempotencyStore } from '../src/infrastructure/prisma/idempotency-store.js';
 
 const databaseUrl = process.env.DATABASE_URL;
 
@@ -438,6 +439,48 @@ test('order repository P2: ordre deterministe de l historique des transitions (o
     assert.equal(history[0]?.toStep, 'creation');
     assert.equal(history[1]?.toStep, 'validation');
     assert.equal(history[2]?.toStep, 'payment');
+  } finally {
+    await client.$disconnect();
+  }
+});
+
+
+test('order creation idempotency: same key returns the same persisted order and does not create a duplicate', { skip: databaseUrl === undefined }, async () => {
+  const client = integrationClient();
+  try {
+    const { serviceId } = await createTestServiceAndCatalogItem(client);
+    const repository = new PrismaOrderRepository(client);
+    const idempotencyStore = new PostgresIdempotencyStore(client);
+    const engine = new OrderEngine({}, repository, {
+      prisma: client,
+      idempotencyStore,
+      createIdempotencyStore: (tx) => new PostgresIdempotencyStore(tx as any),
+    });
+
+    const key = `order-create-${randomUUID()}`;
+    const input = {
+      requesterActorId: `actor-${randomUUID()}`,
+      serviceDefinitionId: serviceId,
+      mode: 'manual' as const,
+      monetaryIntent: { amountCents: 2500, currency: 'EUR' },
+    };
+
+    const first = await engine.createPersisted(input, key);
+    const replay = await engine.createPersisted(input, key);
+
+    assert.equal(replay.id, first.id);
+    assert.equal(replay.orderNumber, first.orderNumber);
+
+    const records = await client.$queryRaw<Array<{ key: string; result_reference: string | null }>>`
+      SELECT key, result_reference
+      FROM idempotency_records
+      WHERE key = ${key} AND operation = 'order.create'
+    `;
+    assert.equal(records.length, 1);
+    assert.equal(records[0]?.result_reference, first.id);
+
+    const orders = await client.order.count({ where: { id: first.id } });
+    assert.equal(orders, 1);
   } finally {
     await client.$disconnect();
   }
