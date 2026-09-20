@@ -31,6 +31,7 @@ export interface AdvanceParams {
   readonly actorId: string;
   readonly toStep: OrderStep;
   readonly metadata?: Record<string, unknown>;
+  readonly idempotencyKey?: string;
 }
 
 export class OrderEngine {
@@ -108,24 +109,58 @@ export class OrderEngine {
     const handler = this.handlers[params.toStep];
 
     if (this.repository) {
-      return await this.repository.advanceWithLock({
-        orderId: params.order.id,
-        expectedFromStep: params.order.currentStep,
-        toStep: params.toStep,
-        actorId: params.actorId,
-        metadata: params.metadata,
-        beforeCommit: handler
-          ? async (lockedOrder, tx) => {
-              await handler({
-                order: lockedOrder,
-                actorId: params.actorId,
-                fromStep: lockedOrder.currentStep,
-                toStep: params.toStep,
-                tx,
-              });
+      const advance = async (tx?: unknown): Promise<Order> => {
+        return await this.repository!.advanceWithLock({
+          orderId: params.order.id,
+          expectedFromStep: params.order.currentStep,
+          toStep: params.toStep,
+          actorId: params.actorId,
+          metadata: params.metadata,
+          beforeCommit: handler
+            ? async (lockedOrder, transaction) => {
+                await handler({
+                  order: lockedOrder,
+                  actorId: params.actorId,
+                  fromStep: lockedOrder.currentStep,
+                  toStep: params.toStep,
+                  tx: transaction,
+                });
+              }
+            : undefined,
+        }, tx);
+      };
+
+      if (params.idempotencyKey && this.createPersistence) {
+        const operation = `order.advance:${params.order.id}:${params.toStep}`;
+        const existing = await this.createPersistence.idempotencyStore.find(params.idempotencyKey, operation);
+        if (existing?.resultReference) {
+          const replay = await this.repository.getById(existing.resultReference);
+          if (replay) return replay;
+        }
+
+        return await this.createPersistence.prisma.$transaction(async (tx) => {
+          const store = this.createPersistence!.createIdempotencyStore(tx);
+          const won = await store.save({
+            key: params.idempotencyKey!,
+            operation,
+            resultReference: params.order.id,
+            createdAt: new Date().toISOString(),
+          });
+
+          if (!won) {
+            const record = await store.find(params.idempotencyKey!, operation);
+            if (record?.resultReference) {
+              const replay = await this.repository!.getById(record.resultReference);
+              if (replay) return replay;
             }
-          : undefined,
-      });
+            throw new Error('Idempotency claim won by another request but no order result is available');
+          }
+
+          return await advance(tx);
+        });
+      }
+
+      return await advance();
     }
 
     if (handler) {
