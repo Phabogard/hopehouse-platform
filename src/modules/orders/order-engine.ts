@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { ValidationError } from '../../core/errors.js';
 import { advanceOrder, createOrder, isOrderComplete, orderCycle, type CreateOrderInput, type Order, type OrderStep } from './orders.js';
 import type { OrderRepository } from './order-repository.js';
