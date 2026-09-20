@@ -298,6 +298,7 @@ export function createHopeHouseServer(options: HopeHouseServerOptions = {}) {
           actorId: currentActor.id,
           toStep: orderStepField(body, 'toStep'),
           metadata: optionalObjectField(body, 'metadata') ?? undefined,
+          idempotencyKey: optionalIdempotencyKey(request),
         });
         if (!orderRepository) {
           orders.set(advancedOrder.id, advancedOrder);
