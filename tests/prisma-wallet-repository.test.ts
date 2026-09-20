@@ -21,8 +21,27 @@ function createMockPrismaClient() {
   const balances = new Map<string, any>(); // key: `${walletId}:${currency}`
   const transactions = new Map<string, any>();
   const reservations = new Map<string, any>();
+  const queryRawImpl = async (strings: any, ...values: any[]) => {
+    const query = Array.isArray(strings) ? strings.join('?') : String(strings);
+    if (query.includes('wallet_balances') && query.includes('FOR UPDATE')) {
+      const walletId = values[0];
+      const currency = values[1];
+      const key = `${walletId}:${currency}`;
+      const b = balances.get(key);
+      if (!b) return [];
+      return [{
+        wallet_id: b.walletId,
+        currency: b.currency,
+        available_cents: b.availableCents,
+        reserved_cents: b.reservedCents,
+      }];
+    }
+    return [];
+  };
+
 
   const client: any = {
+    $queryRaw: queryRawImpl,
     wallet: {
       async create({ data }: any) {
         // UNIQUE(owner_type, owner_id)
@@ -227,6 +246,7 @@ function createMockPrismaClient() {
       const reservationPrevious = new Map<string, any>();
 
       const tx: any = {
+        $queryRaw: queryRawImpl,
         wallet: {
           ...client.wallet,
           async create({ data }: any) {
