@@ -519,3 +519,113 @@ test('Wallet <-> Order transaction: F. OrderEngine payment handler uses the lock
     await client.$disconnect();
   }
 });
+
+
+test('Wallet <-> Order transaction: G. payment handler failure rolls back reservation + outbox + order transition atomically', { skip: databaseUrl === undefined }, async () => {
+  const client = integrationClient();
+  const orderRepo = new PrismaOrderRepository(client);
+  const walletRepo = new PrismaWalletRepository(client);
+
+  try {
+    const { serviceId } = await createTestServiceAndCatalogItem(client);
+    const requesterId = `u-${randomUUID()}`;
+    const wallet = await walletRepo.createWallet({ id: `w-${randomUUID()}`, ownerType: 'USER', ownerId: requesterId });
+
+    await walletRepo.credit({
+      transactionId: `tx-init-${randomUUID()}`,
+      walletId: wallet.id,
+      currency: 'EUR',
+      amountCents: 10_000,
+      actorId: 'system',
+    });
+
+    const order = await orderRepo.create({
+      serviceDefinitionId: serviceId,
+      mode: 'semi_automatic',
+      requesterActorId: requesterId,
+      amountCents: 4_000,
+      currency: 'EUR',
+    });
+
+    const { OrderEngine } = await import('../src/modules/orders/order-engine.js');
+    const engine = new OrderEngine({
+      payment: async ({ order: lockedOrder, actorId, tx }) => {
+        assert.notEqual(tx, undefined, 'payment handler must receive the shared transaction');
+
+        const txClient = tx as any;
+        await walletRepo.reserveWithinTransaction(txClient, {
+          reservationId: randomUUID(),
+          transactionId: randomUUID(),
+          walletId: wallet.id,
+          currency: lockedOrder.monetaryIntent!.currency,
+          amountCents: lockedOrder.monetaryIntent!.amountCents,
+          actorId,
+          transactionKey: `order:${lockedOrder.id}:payment`,
+          relatedEntityType: 'order',
+          relatedEntityId: lockedOrder.id,
+          metadata: { orderId: lockedOrder.id, step: 'payment' },
+        });
+
+        await new PostgresOutboxStore(txClient).append({
+          eventId: randomUUID(),
+          eventType: 'order.payment_reserved',
+          schemaVersion: 1,
+          occurredAt: new Date().toISOString(),
+          correlationId: lockedOrder.id,
+          causationId: null,
+          aggregateType: 'order',
+          aggregateId: lockedOrder.id,
+          payload: {
+            orderId: lockedOrder.id,
+            walletId: wallet.id,
+            amountCents: lockedOrder.monetaryIntent!.amountCents,
+            currency: lockedOrder.monetaryIntent!.currency,
+            actorId,
+          },
+        });
+
+        throw new Error('forced payment handler failure');
+      },
+    }, orderRepo);
+
+    const validatedOrder = await engine.advance({
+      order,
+      actorId: requesterId,
+      toStep: 'validation',
+    });
+
+    await assert.rejects(
+      () =>
+        engine.advance({
+          order: validatedOrder,
+          actorId: requesterId,
+          toStep: 'payment',
+        }),
+      /forced payment handler failure/,
+    );
+
+    const persistedOrder = await orderRepo.getById(order.id);
+    assert.equal(persistedOrder?.currentStep, 'validation');
+
+    const walletState = await walletRepo.getWalletById(wallet.id);
+    assert.equal(walletState?.balances[0].availableCents, 10_000);
+    assert.equal(walletState?.balances[0].reservedCents, 0);
+
+    const reservationCount = await client.walletTransaction.count({
+      where: { walletId: wallet.id, type: 'RESERVATION_HOLD' },
+    });
+    assert.equal(reservationCount, 0);
+
+    const outboxCount = await client.outboxMessage.count({
+      where: { aggregateId: order.id, eventType: 'order.payment_reserved' },
+    });
+    assert.equal(outboxCount, 0);
+
+    const transitionCount = await client.orderTransition.count({
+      where: { orderId: order.id, toStep: 'payment' },
+    });
+    assert.equal(transitionCount, 0);
+  } finally {
+    await client.$disconnect();
+  }
+});
