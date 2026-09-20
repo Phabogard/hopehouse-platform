@@ -108,6 +108,13 @@ function requireAuthContext(auth: AuthRuntime | null): AuthRuntime {
   return auth;
 }
 
+function optionalIdempotencyKey(request: IncomingMessage): string | undefined {
+  const header = request.headers['idempotency-key'];
+  const value = Array.isArray(header) ? header[0] : header;
+  if (value === undefined || value.trim().length === 0) return undefined;
+  return value;
+}
+
 function bearerToken(request: IncomingMessage): string {
   const header = request.headers.authorization;
   if (header === undefined) throw new UnauthorizedError();
@@ -266,8 +273,9 @@ export function createHopeHouseServer(options: HopeHouseServerOptions = {}) {
           monetaryIntent: monetaryIntent === null ? null : { amountCents: integerField(monetaryIntent, 'amountCents'), currency: stringField(monetaryIntent, 'currency') },
           metadata: optionalObjectField(body, 'metadata') ?? undefined,
         };
+        const idempotencyKey = optionalIdempotencyKey(request);
         const order = orderRepository
-          ? await orderEngine.createPersisted(orderInput)
+          ? await orderEngine.createPersisted(orderInput, idempotencyKey)
           : orderEngine.create(orderInput);
         if (!orderRepository) {
           orders.set(order.id, order);

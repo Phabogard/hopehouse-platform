@@ -1,6 +1,8 @@
+import { randomUUID } from 'node:crypto';
 import { ValidationError } from '../../core/errors.js';
 import { advanceOrder, createOrder, isOrderComplete, orderCycle, type CreateOrderInput, type Order, type OrderStep } from './orders.js';
 import type { OrderRepository } from './order-repository.js';
+import type { IdempotencyStore } from '../../core/idempotency/idempotency.js';
 
 export type OrderStepHandler = (context: {
   readonly order: Order;
@@ -18,6 +20,12 @@ export interface RunToAuditParams {
   readonly actorId: string;
 }
 
+export interface OrderCreatePersistenceDependencies {
+  readonly prisma: { $transaction<T>(fn: (tx: unknown) => Promise<T>): Promise<T> };
+  readonly idempotencyStore: IdempotencyStore;
+  readonly createIdempotencyStore: (tx: unknown) => IdempotencyStore;
+}
+
 export interface AdvanceParams {
   readonly order: Order;
   readonly actorId: string;
@@ -29,14 +37,57 @@ export class OrderEngine {
   constructor(
     private readonly handlers: OrderStepHandlers = {},
     private readonly repository?: OrderRepository,
+    private readonly createPersistence?: OrderCreatePersistenceDependencies,
   ) {}
 
   create(input: CreateOrderInput): Order {
     return createOrder(input);
   }
 
-  async createPersisted(input: CreateOrderInput): Promise<Order> {
+  async createPersisted(input: CreateOrderInput, idempotencyKey?: string): Promise<Order> {
     if (this.repository) {
+      if (idempotencyKey && this.createPersistence) {
+        const operation = 'order.create';
+        const existing = await this.createPersistence.idempotencyStore.find(idempotencyKey, operation);
+        if (existing?.resultReference) {
+          const replay = await this.repository.getById(existing.resultReference);
+          if (replay) return replay;
+        }
+
+        const orderId = randomUUID();
+        return await this.createPersistence.prisma.$transaction(async (tx) => {
+          const store = this.createPersistence!.createIdempotencyStore(tx);
+          const won = await store.save({
+            key: idempotencyKey,
+            operation,
+            resultReference: orderId,
+            createdAt: new Date().toISOString(),
+          });
+
+          if (!won) {
+            const record = await store.find(idempotencyKey, operation);
+            if (record?.resultReference) {
+              const replay = await this.repository!.getById(record.resultReference);
+              if (replay) return replay;
+            }
+            throw new Error('Idempotency claim won by another request but no order result is available');
+          }
+
+          return await this.repository!.create({
+            id: orderId,
+            serviceDefinitionId: input.serviceDefinitionId,
+            catalogItemId: input.catalogItemId,
+            mode: input.mode,
+            requesterActorId: input.requesterActorId,
+            beneficiaryId: input.beneficiaryId,
+            channel: input.channel,
+            amountCents: input.monetaryIntent?.amountCents,
+            currency: input.monetaryIntent?.currency,
+            metadata: input.metadata,
+          }, tx);
+        });
+      }
+
       return await this.repository.create({
         serviceDefinitionId: input.serviceDefinitionId,
         catalogItemId: input.catalogItemId,
@@ -49,6 +100,7 @@ export class OrderEngine {
         metadata: input.metadata,
       });
     }
+
     return createOrder(input);
   }
 
