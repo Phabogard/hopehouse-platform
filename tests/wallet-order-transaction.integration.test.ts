@@ -509,7 +509,7 @@ test('Wallet <-> Order transaction: F. OrderEngine payment handler uses the lock
       where: { walletId: wallet.id, type: 'RESERVATION_HOLD' },
     });
     assert.equal(reservationTxs.length, 1);
-    assert.equal(reservationTxs[0]?.amountCents, 4000);
+    assert.equal(reservationTxs[0]?.amountCents, 4000n);
 
     const outboxMessages = await client.outboxMessage.findMany({
       where: { aggregateId: order.id, eventType: 'order.payment_reserved' },
