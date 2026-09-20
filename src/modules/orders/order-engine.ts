@@ -7,6 +7,8 @@ export type OrderStepHandler = (context: {
   readonly actorId: string;
   readonly fromStep: OrderStep;
   readonly toStep: OrderStep;
+  /** Transactional persistence context supplied by the repository during a locked transition. */
+  readonly tx?: unknown;
 }) => Promise<void> | void;
 
 export type OrderStepHandlers = Partial<Record<OrderStep, OrderStepHandler>>;
@@ -61,12 +63,13 @@ export class OrderEngine {
         actorId: params.actorId,
         metadata: params.metadata,
         beforeCommit: handler
-          ? async (lockedOrder) => {
+          ? async (lockedOrder, tx) => {
               await handler({
                 order: lockedOrder,
                 actorId: params.actorId,
                 fromStep: lockedOrder.currentStep,
                 toStep: params.toStep,
+                tx,
               });
             }
           : undefined,
