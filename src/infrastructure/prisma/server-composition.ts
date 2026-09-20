@@ -65,7 +65,7 @@ export async function createPrismaHopeHouseServer(options: PrismaHopeHouseServer
     prisma: client,
     walletRepository,
     idempotencyStore: idempotency,
-    createIdempotencyStore: (tx: Prisma.TransactionClient) => new PostgresIdempotencyStore(tx),
+    createIdempotencyStore: (tx: unknown) => new PostgresIdempotencyStore(tx as Prisma.TransactionClient),
     createOutboxStore: (tx: Prisma.TransactionClient) => new PostgresOutboxStore(tx),
   });
   const wallet = walletApiServiceFromUseCase(creditWalletUseCase);
