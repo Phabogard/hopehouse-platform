@@ -16,11 +16,18 @@ import { createPrismaClient, type CreatePrismaClientOptions } from './client.js'
 import { PostgresIdempotencyStore } from './idempotency-store.js';
 import { PostgresOutboxStore } from '../outbox/postgres-outbox-store.js';
 import type { DomainEventEnvelope } from '../../core/events/domain-event.js';
+import { OutboxRelay } from '../../core/outbox/outbox.js';
 import { WalletNotFoundError } from '../../modules/wallets/prisma-wallet-repository.js';
 import { PrismaOrderRepository } from './order-repository.js';
 import { OrderEngine } from '../../modules/orders/order-engine.js';
 import { MobileMoneyRechargeUseCase } from '../../modules/wallets/mobile-money-recharge-use-case.js';
 import { handleMobileMoneyRechargeHttp } from '../../modules/wallets/mobile-money-recharge-http.js';
+import { PrismaReceiptRepository } from './receipt-repository.js';
+import { ReceiptService } from '../../modules/receipts/receipt-service.js';
+import { handleReceiptHttp } from '../../modules/receipts/receipt-http.js';
+import { OutboxNotificationPublisher } from '../../modules/notifications/outbox-notification-publisher.js';
+import { RechargeNotificationConsumer } from '../../modules/notifications/recharge-notification-consumer.js';
+import type { NotificationTransport } from '../../modules/notifications/notification-transport.js';
 
 type PrismaHopeHouseClient = PrismaClient & PrismaAuthRuntimeClient;
 
@@ -28,6 +35,7 @@ export interface PrismaHopeHouseServerOptions {
   readonly auth?: Omit<PrismaAuthRuntimeOptions, 'prisma'> & {
     readonly prisma?: CreatePrismaClientOptions<PrismaHopeHouseClient>;
   };
+  readonly notificationTransport?: NotificationTransport;
 }
 
 export interface PrismaHopeHouseServerComposition {
@@ -42,6 +50,8 @@ export interface PrismaHopeHouseServerComposition {
   readonly orderRepository: PrismaOrderRepository;
   readonly orderEngine: OrderEngine;
   readonly mobileMoneyRecharge: MobileMoneyRechargeUseCase;
+  readonly receiptService: ReceiptService;
+  processNotificationOutboxBatch(): Promise<number>;
   close(): Promise<void>;
 }
 
@@ -72,17 +82,20 @@ export async function createPrismaHopeHouseServer(options: PrismaHopeHouseServer
     createOutboxStore: (tx: Prisma.TransactionClient) => new PostgresOutboxStore(tx),
   });
   const wallet = walletApiServiceFromUseCase(creditWalletUseCase);
-  const mobileMoneyRecharge = new MobileMoneyRechargeUseCase(
-    client,
-    idempotency,
-    creditWalletUseCase,
-  );
+  const mobileMoneyRecharge = new MobileMoneyRechargeUseCase(client, idempotency, creditWalletUseCase);
+  const receiptService = new ReceiptService(new PrismaReceiptRepository(client));
+
+  const notificationConsumer = options.notificationTransport === undefined
+    ? null
+    : new RechargeNotificationConsumer(options.notificationTransport, idempotency);
+  const notificationPublisher = notificationConsumer === null
+    ? null
+    : new OutboxNotificationPublisher(notificationConsumer);
+
   const orderRepository = new PrismaOrderRepository(client, auditRepository);
   const orderEngine = new OrderEngine({
     payment: async ({ order, actorId, tx }) => {
-      if (tx === undefined) {
-        throw new Error('Transactional context required for payment transition');
-      }
+      if (tx === undefined) throw new Error('Transactional context required for payment transition');
       const transactionClient = tx as Prisma.TransactionClient;
       const monetaryIntent = order.monetaryIntent;
       if (monetaryIntent === null || monetaryIntent.amountCents === 0) return;
@@ -95,9 +108,7 @@ export async function createPrismaHopeHouseServer(options: PrismaHopeHouseServer
           },
         },
       });
-      if (!wallet) {
-        throw new WalletNotFoundError('Wallet not found for requester ' + order.requester.id);
-      }
+      if (!wallet) throw new WalletNotFoundError('Wallet not found for requester ' + order.requester.id);
 
       const walletRepository = new PrismaWalletRepository(transactionClient as unknown as PrismaClient);
       await walletRepository.reserveWithinTransaction(transactionClient, {
@@ -137,6 +148,7 @@ export async function createPrismaHopeHouseServer(options: PrismaHopeHouseServer
     idempotencyStore: idempotency,
     createIdempotencyStore: (tx: unknown) => new PostgresIdempotencyStore(tx as Prisma.TransactionClient),
   });
+
   const baseServer = createHopeHouseServer({ authRuntime, audit, orderRepository, orderEngine });
   const server = createServer((request, response) => {
     const pathname = new URL(request.url ?? '/', 'http://localhost').pathname;
@@ -149,6 +161,13 @@ export async function createPrismaHopeHouseServer(options: PrismaHopeHouseServer
     }
     if (pathname.includes('/recharges')) {
       void handleMobileMoneyRechargeHttp(authRuntime, mobileMoneyRecharge, request, response).catch((error: unknown) => {
+        response.writeHead(500, { 'content-type': 'application/json; charset=utf-8' });
+        response.end(JSON.stringify({ error: error instanceof Error ? error.message : 'Internal Server Error' }));
+      });
+      return;
+    }
+    if (pathname.startsWith('/receipts/')) {
+      void handleReceiptHttp(authRuntime, receiptService, request, response).catch((error: unknown) => {
         response.writeHead(500, { 'content-type': 'application/json; charset=utf-8' });
         response.end(JSON.stringify({ error: error instanceof Error ? error.message : 'Internal Server Error' }));
       });
@@ -176,6 +195,15 @@ export async function createPrismaHopeHouseServer(options: PrismaHopeHouseServer
     orderRepository,
     orderEngine,
     mobileMoneyRecharge,
+    receiptService,
+    async processNotificationOutboxBatch(): Promise<number> {
+      if (notificationPublisher === null) return 0;
+      const relay = new OutboxRelay(new PostgresOutboxStore(client), notificationPublisher, {
+        workerId: 'notification-worker',
+        batchSize: 50,
+      });
+      return relay.processBatch();
+    },
     async close(): Promise<void> {
       await new Promise<void>((resolve) => server.close(() => resolve()));
       await new Promise<void>((resolve) => baseServer.close(() => resolve()));
