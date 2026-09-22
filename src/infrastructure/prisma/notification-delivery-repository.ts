@@ -24,6 +24,7 @@ export class PrismaNotificationDeliveryRepository implements NotificationDeliver
   constructor(private readonly client: PrismaNotificationDeliveryClient) {}
 
   async claim(input: {
+    readonly id: string;
     readonly deduplicationKey: string;
     readonly deviceId: string;
     readonly provider: string;
