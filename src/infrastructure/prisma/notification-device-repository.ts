@@ -1,4 +1,4 @@
-import type { PrismaClient } from '@prisma/client';
+import { Prisma, type PrismaClient } from '@prisma/client';
 import type {
   NotificationDeviceRecord,
   NotificationDeviceRepository,
@@ -48,7 +48,7 @@ export class PrismaNotificationDeviceRepository implements NotificationDeviceRep
 
   async upsertActive(input: RegisterNotificationDeviceInput & { readonly now: string }): Promise<NotificationDeviceRecord> {
     const now = new Date(input.now);
-    const metadata = input.metadata ?? {};
+    const metadata = (input.metadata ?? {}) as Prisma.InputJsonValue;
 
     const device = await this.prisma.notificationDevice.upsert({
       where: {
