@@ -19,6 +19,8 @@ import type { DomainEventEnvelope } from '../../core/events/domain-event.js';
 import { WalletNotFoundError } from '../../modules/wallets/prisma-wallet-repository.js';
 import { PrismaOrderRepository } from './order-repository.js';
 import { OrderEngine } from '../../modules/orders/order-engine.js';
+import { MobileMoneyRechargeUseCase } from '../../modules/wallets/mobile-money-recharge-use-case.js';
+import { handleMobileMoneyRechargeHttp } from '../../modules/wallets/mobile-money-recharge-http.js';
 
 type PrismaHopeHouseClient = PrismaClient & PrismaAuthRuntimeClient;
 
@@ -39,6 +41,7 @@ export interface PrismaHopeHouseServerComposition {
   readonly wallet: WalletApiService;
   readonly orderRepository: PrismaOrderRepository;
   readonly orderEngine: OrderEngine;
+  readonly mobileMoneyRecharge: MobileMoneyRechargeUseCase;
   close(): Promise<void>;
 }
 
@@ -69,6 +72,11 @@ export async function createPrismaHopeHouseServer(options: PrismaHopeHouseServer
     createOutboxStore: (tx: Prisma.TransactionClient) => new PostgresOutboxStore(tx),
   });
   const wallet = walletApiServiceFromUseCase(creditWalletUseCase);
+  const mobileMoneyRecharge = new MobileMoneyRechargeUseCase(
+    client,
+    idempotency,
+    creditWalletUseCase,
+  );
   const orderRepository = new PrismaOrderRepository(client, auditRepository);
   const orderEngine = new OrderEngine({
     payment: async ({ order, actorId, tx }) => {
@@ -139,6 +147,13 @@ export async function createPrismaHopeHouseServer(options: PrismaHopeHouseServer
       });
       return;
     }
+    if (pathname.includes('/recharges')) {
+      void handleMobileMoneyRechargeHttp(authRuntime, mobileMoneyRecharge, request, response).catch((error: unknown) => {
+        response.writeHead(500, { 'content-type': 'application/json; charset=utf-8' });
+        response.end(JSON.stringify({ error: error instanceof Error ? error.message : 'Internal Server Error' }));
+      });
+      return;
+    }
     if (pathname.startsWith('/wallets/')) {
       void handleWalletHttp(authRuntime, wallet, request, response).catch((error: unknown) => {
         response.writeHead(500, { 'content-type': 'application/json; charset=utf-8' });
@@ -160,6 +175,7 @@ export async function createPrismaHopeHouseServer(options: PrismaHopeHouseServer
     wallet,
     orderRepository,
     orderEngine,
+    mobileMoneyRecharge,
     async close(): Promise<void> {
       await new Promise<void>((resolve) => server.close(() => resolve()));
       await new Promise<void>((resolve) => baseServer.close(() => resolve()));

@@ -39,6 +39,8 @@
 | catalogue:price:manage | oui | oui | non | non | non | non | non |
 | catalogue:commission:manage | oui | oui | non | non | non | non | non |
 | catalogue:service:manage | oui | oui | non | non | non | non | non |
+| wallets:recharge | oui | non | non | oui | non | non | non |
+| wallets:reconcile | oui | non | non | non | non | non | non |
 | wallets:credit | oui | non | non | non | oui | non | non |
 
 ## Règles
