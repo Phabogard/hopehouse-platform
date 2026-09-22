@@ -65,6 +65,7 @@ async function fixture(db: PrismaClient) {
 async function cleanup(db: PrismaClient, f: Awaited<ReturnType<typeof fixture>>, keys: string[]) {
   await db.outboxMessage.deleteMany({ where: { aggregateId: f.walletId } });
   if (keys.length > 0) await db.$executeRaw`DELETE FROM idempotency_records WHERE key = ANY(${keys})`;
+  await db.walletReceipt.deleteMany({ where: { walletId: f.walletId } });
   await db.auditLog.deleteMany({ where: { entityType: 'mobile_money_recharge_attempt' } });
   await db.walletTransaction.deleteMany({ where: { walletId: f.walletId } });
   await db.walletBalance.deleteMany({ where: { walletId: f.walletId } });
@@ -104,13 +105,16 @@ test('mobile money recharge: confirmation atomique + rejeu idempotent sans secon
     });
 
     assert.equal(confirmed.replayed, false);
-    assert.equal(confirmed.attempt.status, 'WALLET_CREDITED');
+    assert.equal(confirmed.attempt.status, 'RECEIPT_ISSUED');
+    assert.equal(confirmed.receipt?.receiptNumber, `RCH-${attemptId}`);
+    assert.equal(confirmed.receipt?.amountCents, 2_000n);
     assert.equal((await db.walletBalance.findUnique({
       where: { walletId_currency: { walletId: f.walletId, currency: 'USD' } },
     }))?.availableCents, 2_000n);
     assert.equal(await db.walletTransaction.count({ where: { walletId: f.walletId } }), 1);
     assert.equal(await db.auditLog.count({ where: { entityId: attemptId } }), 1);
-    assert.equal(await db.outboxMessage.count({ where: { aggregateId: f.walletId } }), 2);
+    assert.equal(await db.outboxMessage.count({ where: { aggregateId: f.walletId } }), 4);
+    assert.equal(await db.walletReceipt.count({ where: { rechargeAttemptId: attemptId } }), 1);
 
     const replay = await useCase.confirm({
       attemptId,
@@ -122,6 +126,7 @@ test('mobile money recharge: confirmation atomique + rejeu idempotent sans secon
     });
     assert.equal(replay.replayed, true);
     assert.equal(await db.walletTransaction.count({ where: { walletId: f.walletId } }), 1);
+    assert.equal(await db.walletReceipt.count({ where: { rechargeAttemptId: attemptId } }), 1);
   } finally {
     await cleanup(db, f, [createKey, confirmKey]);
     await db.$disconnect();
@@ -159,6 +164,99 @@ test('mobile money recharge: mismatch → aucun crédit Wallet', { skip: databas
     assert.equal(await db.walletTransaction.count({ where: { walletId: f.walletId } }), 0);
   } finally {
     await cleanup(db, f, [createKey, confirmKey]);
+    await db.$disconnect();
+  }
+});
+
+
+test('mobile money recharge: référence externe dupliquée → conflit 409 sans corruption', { skip: databaseUrl === undefined }, async () => {
+  const db = client();
+  const f = await fixture(db);
+  const createKeyA = randomUUID();
+  const createKeyB = randomUUID();
+  const externalReference = `mm-duplicate-${randomUUID()}`;
+
+  try {
+    const useCase = build(db);
+    await useCase.create({
+      orderId: f.orderId,
+      walletId: f.walletId,
+      amountCents: 2_000,
+      currency: 'USD',
+      network: 'test-network',
+      externalReference,
+      actorId: f.userId,
+      idempotencyKey: createKeyA,
+    });
+
+    await assert.rejects(
+      () => useCase.create({
+        orderId: f.orderId,
+        walletId: f.walletId,
+        amountCents: 2_000,
+        currency: 'USD',
+        network: 'test-network',
+        externalReference,
+        actorId: f.userId,
+        idempotencyKey: createKeyB,
+      }),
+      (error: unknown) => error instanceof Error && 'code' in error && (error as { code?: unknown }).code === 'RECHARGE_CONFLICT',
+    );
+    assert.equal(await db.mobileMoneyRechargeAttempt.count({ where: { walletId: f.walletId } }), 1);
+  } finally {
+    await cleanup(db, f, [createKeyA, createKeyB]);
+    await db.$disconnect();
+  }
+});
+
+test('mobile money recharge: confirmations concurrentes → un seul crédit et un seul reçu', { skip: databaseUrl === undefined }, async () => {
+  const db = client();
+  const f = await fixture(db);
+  const createKey = randomUUID();
+  const confirmKeyA = randomUUID();
+  const confirmKeyB = randomUUID();
+
+  try {
+    const useCase = build(db);
+    const created = await useCase.create({
+      orderId: f.orderId,
+      walletId: f.walletId,
+      amountCents: 2_000,
+      currency: 'USD',
+      network: 'test-network',
+      actorId: f.userId,
+      idempotencyKey: createKey,
+    });
+    const attemptId = String(created.attempt.id);
+
+    const results = await Promise.allSettled([
+      useCase.confirm({
+        attemptId,
+        walletId: f.walletId,
+        confirmedAmountCents: 2_000,
+        confirmedCurrency: 'USD',
+        actorId: 'system-admin',
+        idempotencyKey: confirmKeyA,
+      }),
+      useCase.confirm({
+        attemptId,
+        walletId: f.walletId,
+        confirmedAmountCents: 2_000,
+        confirmedCurrency: 'USD',
+        actorId: 'system-admin',
+        idempotencyKey: confirmKeyB,
+      }),
+    ]);
+
+    assert.equal(results.filter((r) => r.status === 'fulfilled').length, 1);
+    assert.equal(results.filter((r) => r.status === 'rejected').length, 1);
+    assert.equal((await db.walletBalance.findUnique({
+      where: { walletId_currency: { walletId: f.walletId, currency: 'USD' } },
+    }))?.availableCents, 2_000n);
+    assert.equal(await db.walletTransaction.count({ where: { walletId: f.walletId } }), 1);
+    assert.equal(await db.walletReceipt.count({ where: { rechargeAttemptId: attemptId } }), 1);
+  } finally {
+    await cleanup(db, f, [createKey, confirmKeyA, confirmKeyB]);
     await db.$disconnect();
   }
 });
