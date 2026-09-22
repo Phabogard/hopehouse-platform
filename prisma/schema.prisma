@@ -117,10 +117,35 @@ model User {
   revokedSessions         LoginSession[]        @relation("SessionRevokedBy")
   adminAccessLogsAsActor  AdminAccessLog[]      @relation("AdminAccessLogActor")
   adminAccessLogsAsTarget AdminAccessLog[]      @relation("AdminAccessLogTarget")
+  notificationDevices     NotificationDevice[]
 
   @@index([status])
   @@index([roleId])
   @@map("users")
+}
+
+model NotificationDevice {
+  id                String   @id
+  userId            String   @map("user_id")
+  provider          String
+  platform          String
+  installationId    String   @map("installation_id")
+  registrationToken String   @map("registration_token")
+  status            String   @default("active")
+  createdAt         DateTime @default(now()) @db.Timestamptz(3) @map("created_at")
+  updatedAt         DateTime @updatedAt @db.Timestamptz(3) @map("updated_at")
+  lastSeenAt        DateTime @db.Timestamptz(3) @map("last_seen_at")
+  revokedAt         DateTime? @db.Timestamptz(3) @map("revoked_at")
+  metadata          Json
+
+  user User @relation(fields: [userId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([userId, provider, installationId], name: "notification_devices_user_provider_installation_unique", map: "notification_devices_user_provider_installation_unique")
+  @@unique([provider, registrationToken], map: "notification_devices_provider_token_unique")
+  @@index([userId, status], map: "notification_devices_user_status_idx")
+  @@index([provider, platform, status], map: "notification_devices_provider_platform_status_idx")
+  @@index([lastSeenAt], map: "notification_devices_last_seen_at_idx")
+  @@map("notification_devices")
 }
 
 model AppSetting {
