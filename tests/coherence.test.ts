@@ -453,3 +453,42 @@ test('database contract aligns durable idempotency persistence with Prisma', () 
   }
   assert.equal(store.includes('ON CONFLICT ("key", "operation") DO NOTHING'), true);
 });
+
+
+test('notification device persistence stays provider-independent across Prisma schema and migration', () => {
+  const migration = readProjectFile('prisma/migrations/20260922170000_notification_devices/migration.sql');
+  const prisma = readProjectFile('prisma/schema.prisma');
+  const registry = readProjectFile('src/modules/notifications/notification-device-registry.ts');
+  const repository = readProjectFile('src/infrastructure/prisma/notification-device-repository.ts');
+  const composition = readProjectFile('src/infrastructure/prisma/server-composition.ts');
+
+  assert.match(migration, /CREATE TABLE "notification_devices"/);
+  for (const indexName of [
+    'notification_devices_user_provider_installation_unique',
+    'notification_devices_provider_token_unique',
+    'notification_devices_user_status_idx',
+    'notification_devices_provider_platform_status_idx',
+    'notification_devices_last_seen_at_idx',
+  ]) {
+    assert.equal(migration.includes(indexName), true, indexName);
+  }
+
+  for (const field of [
+    'model NotificationDevice',
+    'userId            String   @map("user_id")',
+    'provider          String',
+    'platform          String',
+    'installationId    String   @map("installation_id")',
+    'registrationToken String   @map("registration_token")',
+    'status            String   @default("active")',
+    '@@map("notification_devices")',
+  ]) {
+    assert.equal(prisma.includes(field), true, field);
+  }
+
+  assert.equal(registry.includes('NotificationDeviceRepository'), true);
+  assert.equal(registry.includes('NotificationDeviceRegistry'), true);
+  assert.equal(repository.includes('notification_devices_user_provider_installation_unique'), true);
+  assert.equal(repository.includes('notificationDevice.upsert'), true);
+  assert.equal(composition.includes('new PrismaNotificationDeviceRepository(client)'), true);
+});
