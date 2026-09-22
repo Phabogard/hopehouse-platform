@@ -8,6 +8,8 @@ export type {
   OutboxRelayOptions,
 } from "./outbox/outbox.js";
 export { OutboxRelay, calculateExponentialBackoff } from "./outbox/outbox.js";
+export { OutboxWorker } from "./outbox/outbox-worker.js";
+export type { OutboxWorkerOptions } from "./outbox/outbox-worker.js";
 export { ConcurrencyConflictError, assertExpectedVersion } from "./concurrency/optimistic-concurrency.js";
 export type { VersionedAggregate } from "./concurrency/optimistic-concurrency.js";
 export type { IdempotencyRecord, IdempotencyStore } from "./idempotency/idempotency.js";
