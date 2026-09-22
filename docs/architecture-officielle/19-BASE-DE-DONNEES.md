@@ -10,7 +10,7 @@ roles, permissions, role_permissions, users, beneficiaries, services, subscripti
 
 ## Tables cibles déjà esquissées dans le SQL
 
-client_profiles, agent_profiles, catalogs, catalog_items, networks, providers, service_definitions, service_modes, price_rules, commission_rules, wallets, wallet_balances, wallet_transactions, orders, order_items, order_steps, order_attempts, order_history, notifications, receipts, connectors et connector_bindings.
+client_profiles, agent_profiles, catalogs, catalog_items, networks, providers, service_definitions, service_modes, price_rules, commission_rules, wallets, wallet_balances, wallet_transactions, orders, order_items, order_steps, order_attempts, order_transitions, mobile_money_recharge_attempts, notifications, receipts, connectors et connector_bindings.
 
 ## Tables futures obligatoires non encore présentes
 
@@ -56,6 +56,8 @@ Wallets : wallets, wallet_balances, wallet_transactions. Rôle : gérer solde di
 Commandes : orders, order_items, order_steps, order_attempts, order_history. Rôle : moteur universel. Contraintes : cycle incluant payment, statuts contrôlés, historique append-only, tentatives refusées conservées.
 
 Notifications, receipts, connectors, connector_bindings : rôle : notification, preuve de transaction et intégrations techniques indépendantes. Contraintes : statut, liens entité, configuration protégée.
+
+mobile_money_recharge_attempts : rôle : suivi des tentatives de recharge Mobile Money externe et de leur rapprochement. Contraintes : montant strictement positif, devise à trois lettres, réseau non vide, référence externe unique lorsqu'elle est fournie. Cette table n'est pas un ledger et aucun solde n'y est modifié directement.
 
 ## Futures tables obligatoires détaillées
 
