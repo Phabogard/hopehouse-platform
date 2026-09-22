@@ -134,7 +134,7 @@ export class MobileMoneyRechargeUseCase {
           status: 'RECONCILIATION_PENDING',
           externalReference: command.externalReference,
           detectedAt: new Date(),
-          metadataJson: command.metadata ?? {},
+          metadataJson: (command.metadata ?? {}) as Prisma.InputJsonValue,
         },
       });
       return { attempt: attempt as unknown as Record<string, unknown>, replayed: false };
@@ -206,7 +206,7 @@ export class MobileMoneyRechargeUseCase {
           confirmedCurrency,
           externalReference: reference,
           reviewedByActorId: command.actorId,
-          reviewMetadataJson: command.reviewMetadata ?? {},
+          reviewMetadataJson: (command.reviewMetadata ?? {}) as Prisma.InputJsonValue,
           confirmedAt: command.confirmedAmountCents === requestedAmount && confirmedCurrency === requestedCurrency ? new Date() : null,
           status: command.confirmedAmountCents === requestedAmount && confirmedCurrency === requestedCurrency ? 'CONFIRMED' : 'MISMATCH',
         },
