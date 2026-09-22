@@ -108,7 +108,7 @@ La recharge réutilise :
 - `audit_logs` pour la traçabilité ;
 - le mécanisme d'idempotence existant pour empêcher les doubles traitements.
 
-Une nouvelle table ne doit être créée que si une information de rapprochement externe ne peut pas être portée proprement par les modèles existants. La duplication de `wallet_transactions` ou la création d'un deuxième ledger est interdite.
+Le rapprochement externe possède désormais sa propre table `mobile_money_recharge_attempts` : elle porte l'état de la tentative, la référence fournisseur, le montant/devise demandés, le réseau et la traçabilité de validation. Elle ne constitue pas un ledger financier et ne remplace jamais `wallet_transactions`. Une seule référence externe fournie par un fournisseur peut exister par tentative grâce à une contrainte d'unicité partielle.
 
 ## 8. UX cible
 
