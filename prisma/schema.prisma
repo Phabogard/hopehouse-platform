@@ -570,6 +570,8 @@ model MobileMoneyRechargeAttempt {
   network               String                    @map("network")
   status                MobileMoneyRechargeStatus @default(INITIATED) @map("status")
   externalReference     String?                   @map("external_reference")
+  confirmedAmountCents  BigInt?                   @map("confirmed_amount_cents")
+  confirmedCurrency     String?                   @map("confirmed_currency")
   detectedAt            DateTime?                 @db.Timestamptz(3) @map("detected_at")
   confirmedAt           DateTime?                 @db.Timestamptz(3) @map("confirmed_at")
   reviewedByActorId     String?                   @map("reviewed_by_actor_id")
