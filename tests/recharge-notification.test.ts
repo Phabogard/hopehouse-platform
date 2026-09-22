@@ -53,7 +53,7 @@ test('RechargeNotificationConsumer is idempotent on redelivery', async () => {
 test('RechargeNotificationConsumer ignores unrelated events', async () => {
   const transport = new InMemoryNotificationTransport();
   const consumer = new RechargeNotificationConsumer(transport, new Store());
-  const result = await consumer.handle({ ...event, eventType: 'wallet.recharge_credited' } as typeof event);
+  const result = await consumer.handle({ ...event, eventType: 'wallet.recharge_credited' } as unknown as typeof event);
   assert.equal(result.processed, false);
   assert.equal(transport.sent.length, 0);
 });
