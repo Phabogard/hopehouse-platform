@@ -431,6 +431,22 @@ model IdempotencyRecord {
 // MODULE WALLETS (OPTION B - FK COMPOSITES)
 // ==========================================
 
+enum MobileMoneyRechargeStatus {
+  INITIATED
+  AWAITING_PAYMENT
+  PAYMENT_DETECTED
+  RECONCILIATION_PENDING
+  CONFIRMED
+  WALLET_CREDITED
+  RECEIPT_ISSUED
+  EXPIRED
+  CANCELLED
+  REJECTED
+  MISMATCH
+  DUPLICATE
+  FAILED
+}
+
 enum WalletStatus {
   ACTIVE
   FROZEN
@@ -469,6 +485,7 @@ model Wallet {
   balances     WalletBalance[]
   transactions WalletTransaction[]
   reservations WalletReservation[]
+  rechargeAttempts MobileMoneyRechargeAttempt[]
 
   @@unique([ownerType, ownerId], name: "wallets_owner_type_owner_id_unique")
   @@index([ownerType, ownerId], name: "wallets_owner_lookup_idx")
@@ -544,6 +561,33 @@ model WalletReservation {
   @@map("wallet_reservations")
 }
 
+model MobileMoneyRechargeAttempt {
+  id                    String                    @id @map("id")
+  orderId               String                    @map("order_id")
+  walletId              String                    @map("wallet_id")
+  requestedAmountCents  BigInt                    @map("requested_amount_cents")
+  requestedCurrency     String                    @map("requested_currency")
+  network               String                    @map("network")
+  status                MobileMoneyRechargeStatus @default(INITIATED) @map("status")
+  externalReference     String?                   @map("external_reference")
+  detectedAt            DateTime?                 @db.Timestamptz(3) @map("detected_at")
+  confirmedAt           DateTime?                 @db.Timestamptz(3) @map("confirmed_at")
+  reviewedByActorId     String?                   @map("reviewed_by_actor_id")
+  reviewMetadataJson    Json?                     @map("review_metadata_json")
+  createdAt             DateTime                  @default(now()) @db.Timestamptz(3) @map("created_at")
+  updatedAt             DateTime                  @updatedAt @db.Timestamptz(3) @map("updated_at")
+  metadataJson          Json                      @map("metadata_json")
+
+  order  Order  @relation(fields: [orderId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  wallet Wallet @relation(fields: [walletId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([orderId, createdAt], name: "mobile_money_recharge_attempts_order_created_at_idx")
+  @@index([walletId, status, createdAt], name: "mobile_money_recharge_attempts_wallet_status_created_at_idx")
+  @@index([status, createdAt], name: "mobile_money_recharge_attempts_status_created_at_idx")
+  @@index([externalReference], name: "mobile_money_recharge_attempts_external_reference_idx")
+  @@map("mobile_money_recharge_attempts")
+}
+
 // ==========================================
 // MODULE ORDERS & ORDER TRANSITIONS
 // ==========================================
@@ -587,6 +631,7 @@ model Order {
   updatedAt           DateTime   @updatedAt @db.Timestamptz(3) @map("updated_at")
 
   transitions OrderTransition[]
+  mobileMoneyRechargeAttempts MobileMoneyRechargeAttempt[]
 
   @@index([currentStep], name: "orders_current_step_idx")
   @@index([serviceDefinitionId], name: "orders_service_definition_id_idx")
