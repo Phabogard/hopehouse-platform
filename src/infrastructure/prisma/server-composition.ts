@@ -30,7 +30,12 @@ import { OutboxNotificationPublisher } from '../../modules/notifications/outbox-
 import { RechargeNotificationConsumer } from '../../modules/notifications/recharge-notification-consumer.js';
 import { NotificationDeviceRegistry } from '../../modules/notifications/notification-device-registry.js';
 import { PrismaNotificationDeviceRepository } from './notification-device-repository.js';
+import { PrismaNotificationDeliveryRepository } from './notification-delivery-repository.js';
 import type { NotificationTransport } from '../../modules/notifications/notification-transport.js';
+import {
+  createFcmNotificationDeviceSenderFromEnvironment,
+  NotificationDeviceFanoutTransport,
+} from '../../modules/notifications/notification-device-dispatcher.js';
 import { PrismaNotificationRecipientResolver } from './notification-recipient-resolver.js';
 
 type PrismaHopeHouseClient = PrismaClient & PrismaAuthRuntimeClient;
@@ -85,6 +90,7 @@ export async function createPrismaHopeHouseServer(options: PrismaHopeHouseServer
   const catalogue = new CatalogueService(new PrismaCatalogRepository(client));
   const idempotency = new PostgresIdempotencyStore(client);
   const notificationDevices = new NotificationDeviceRegistry(new PrismaNotificationDeviceRepository(client));
+  const notificationDeliveries = new PrismaNotificationDeliveryRepository(client);
   const walletRepository = new PrismaWalletRepository(client);
   const notificationRecipientResolver = new PrismaNotificationRecipientResolver(walletRepository);
   const creditWalletUseCase = new CreditWalletUseCase({
@@ -98,9 +104,18 @@ export async function createPrismaHopeHouseServer(options: PrismaHopeHouseServer
   const mobileMoneyRecharge = new MobileMoneyRechargeUseCase(client, idempotency, creditWalletUseCase);
   const receiptService = new ReceiptService(new PrismaReceiptRepository(client));
 
-  const notificationConsumer = options.notificationTransport === undefined
+  const notificationTransport = options.notificationTransport
+    ?? (process.env.NOTIFICATION_TRANSPORT === 'fcm'
+      ? new NotificationDeviceFanoutTransport(
+          notificationDevices,
+          [createFcmNotificationDeviceSenderFromEnvironment()],
+          notificationDeliveries,
+        )
+      : undefined);
+
+  const notificationConsumer = notificationTransport === undefined
     ? null
-    : new RechargeNotificationConsumer(options.notificationTransport, idempotency, notificationRecipientResolver);
+    : new RechargeNotificationConsumer(notificationTransport, idempotency, notificationRecipientResolver);
   const notificationPublisher = notificationConsumer === null
     ? null
     : new OutboxNotificationPublisher(notificationConsumer);

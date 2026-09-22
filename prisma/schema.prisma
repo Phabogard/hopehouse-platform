@@ -124,6 +124,25 @@ model User {
   @@map("users")
 }
 
+model NotificationDelivery {
+  id                String   @id
+  deduplicationKey  String   @map("deduplication_key")
+  deviceId          String   @map("device_id")
+  provider          String
+  status            String
+  providerMessageId String?  @map("provider_message_id")
+  lastError         String?  @map("last_error")
+  createdAt         DateTime @db.Timestamptz(3) @map("created_at")
+  updatedAt         DateTime @db.Timestamptz(3) @map("updated_at")
+
+  device NotificationDevice @relation(fields: [deviceId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@unique([deduplicationKey, deviceId], name: "notification_deliveries_key_device_unique", map: "notification_deliveries_key_device_unique")
+  @@index([status, updatedAt], map: "notification_deliveries_status_updated_at_idx")
+  @@index([deviceId, createdAt], map: "notification_deliveries_device_created_at_idx")
+  @@map("notification_deliveries")
+}
+
 model NotificationDevice {
   id                String   @id
   userId            String   @map("user_id")
@@ -139,6 +158,7 @@ model NotificationDevice {
   metadata          Json
 
   user User @relation(fields: [userId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  deliveries NotificationDelivery[]
 
   @@unique([userId, provider, installationId], name: "notification_devices_user_provider_installation_unique", map: "notification_devices_user_provider_installation_unique")
   @@unique([provider, registrationToken], map: "notification_devices_provider_token_unique")

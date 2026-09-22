@@ -3,7 +3,7 @@ export interface SendNotificationInput {
   readonly template: string;
   readonly channel: string;
   readonly payload: Readonly<Record<string, unknown>>;
-  /** Stable provider-level idempotency key. External providers MUST deduplicate on this key. */
+  /** Stable application-level delivery key. The transport owns deduplication; external providers are not assumed to deduplicate it. */
   readonly deduplicationKey: string;
 }
 
