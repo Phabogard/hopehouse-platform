@@ -205,7 +205,7 @@ test('NotificationDeviceFanoutTransport revokes an FCM device after UNREGISTERED
 class DeliveryLedger implements NotificationDeliveryRepository {
   private readonly rows = new Map<string, 'sending' | 'sent' | 'failed'>();
 
-  async claim(input: { deduplicationKey: string; deviceId: string; provider: string; now: string }): Promise<'claimed' | 'sent' | 'sending'> {
+  async claim(input: { id: string; deduplicationKey: string; deviceId: string; provider: string; now: string }): Promise<'claimed' | 'sent' | 'sending'> {
     const key = input.deduplicationKey + ':' + input.deviceId;
     const existing = this.rows.get(key);
     if (existing === 'sent' || existing === 'sending') return existing;
