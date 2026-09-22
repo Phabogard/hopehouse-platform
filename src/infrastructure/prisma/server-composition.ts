@@ -28,6 +28,8 @@ import { ReceiptService } from '../../modules/receipts/receipt-service.js';
 import { handleReceiptHttp } from '../../modules/receipts/receipt-http.js';
 import { OutboxNotificationPublisher } from '../../modules/notifications/outbox-notification-publisher.js';
 import { RechargeNotificationConsumer } from '../../modules/notifications/recharge-notification-consumer.js';
+import { NotificationDeviceRegistry } from '../../modules/notifications/notification-device-registry.js';
+import { PrismaNotificationDeviceRepository } from './notification-device-repository.js';
 import type { NotificationTransport } from '../../modules/notifications/notification-transport.js';
 
 type PrismaHopeHouseClient = PrismaClient & PrismaAuthRuntimeClient;
@@ -52,6 +54,7 @@ export interface PrismaHopeHouseServerComposition {
   readonly audit: AuditLogService;
   readonly catalogue: CatalogueService;
   readonly idempotency: PostgresIdempotencyStore;
+  readonly notificationDevices: NotificationDeviceRegistry;
   readonly wallet: WalletApiService;
   readonly orderRepository: PrismaOrderRepository;
   readonly orderEngine: OrderEngine;
@@ -80,6 +83,7 @@ export async function createPrismaHopeHouseServer(options: PrismaHopeHouseServer
   const audit = new AuditLogService(auditRepository);
   const catalogue = new CatalogueService(new PrismaCatalogRepository(client));
   const idempotency = new PostgresIdempotencyStore(client);
+  const notificationDevices = new NotificationDeviceRegistry(new PrismaNotificationDeviceRepository(client));
   const walletRepository = new PrismaWalletRepository(client);
   const creditWalletUseCase = new CreditWalletUseCase({
     prisma: client,
@@ -210,6 +214,7 @@ export async function createPrismaHopeHouseServer(options: PrismaHopeHouseServer
     audit,
     catalogue,
     idempotency,
+    notificationDevices,
     wallet,
     orderRepository,
     orderEngine,
