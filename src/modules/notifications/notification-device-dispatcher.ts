@@ -262,15 +262,9 @@ export class NotificationDeviceFanoutTransport implements NotificationTransport 
           throw new NotificationDeliveryInProgressError(input.deduplicationKey, device.id);
         }
 
+        let result: { readonly id: string };
         try {
-          const result = await sender.send({ device, notification: input });
-          await this.deliveryRepository.markSent({
-            deduplicationKey: input.deduplicationKey,
-            deviceId: device.id,
-            providerMessageId: result.id,
-            now: new Date().toISOString(),
-          });
-          return { skipped: false };
+          result = await sender.send({ device, notification: input });
         } catch (error: unknown) {
           await this.deliveryRepository.markFailed({
             deduplicationKey: input.deduplicationKey,
@@ -290,6 +284,14 @@ export class NotificationDeviceFanoutTransport implements NotificationTransport 
           }
           throw error;
         }
+
+        await this.deliveryRepository.markSent({
+          deduplicationKey: input.deduplicationKey,
+          deviceId: device.id,
+          providerMessageId: result.id,
+          now: new Date().toISOString(),
+        });
+        return { skipped: false };
       }
 
       try {
