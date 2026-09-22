@@ -145,6 +145,7 @@ export async function handleMobileMoneyRechargeHttp(
       authorize(actor, 'wallets:reconcile');
       const command: ConfirmRechargeCommand = {
         attemptId: segments[3]!,
+        walletId: segments[1]!,
         confirmedAmountCents: requiredAmount(body, 'confirmedAmountCents'),
         confirmedCurrency: requiredString(body, 'confirmedCurrency'),
         externalReference: optionalString(body, 'externalReference'),
