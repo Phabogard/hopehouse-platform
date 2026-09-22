@@ -14,6 +14,7 @@ export interface NotificationDeliveryRecord {
 
 export interface NotificationDeliveryRepository {
   claim(input: {
+    readonly id: string;
     readonly deduplicationKey: string;
     readonly deviceId: string;
     readonly provider: string;
