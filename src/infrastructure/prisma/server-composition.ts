@@ -30,6 +30,7 @@ import { OutboxNotificationPublisher } from '../../modules/notifications/outbox-
 import { RechargeNotificationConsumer } from '../../modules/notifications/recharge-notification-consumer.js';
 import { NotificationDeviceRegistry } from '../../modules/notifications/notification-device-registry.js';
 import { PrismaNotificationDeviceRepository } from './notification-device-repository.js';
+import { PrismaNotificationDeliveryRepository } from './notification-delivery-repository.js';
 import type { NotificationTransport } from '../../modules/notifications/notification-transport.js';
 import {
   createFcmNotificationDeviceSenderFromEnvironment,
@@ -89,6 +90,7 @@ export async function createPrismaHopeHouseServer(options: PrismaHopeHouseServer
   const catalogue = new CatalogueService(new PrismaCatalogRepository(client));
   const idempotency = new PostgresIdempotencyStore(client);
   const notificationDevices = new NotificationDeviceRegistry(new PrismaNotificationDeviceRepository(client));
+  const notificationDeliveries = new PrismaNotificationDeliveryRepository(client);
   const walletRepository = new PrismaWalletRepository(client);
   const notificationRecipientResolver = new PrismaNotificationRecipientResolver(walletRepository);
   const creditWalletUseCase = new CreditWalletUseCase({
@@ -107,6 +109,7 @@ export async function createPrismaHopeHouseServer(options: PrismaHopeHouseServer
       ? new NotificationDeviceFanoutTransport(
           notificationDevices,
           [createFcmNotificationDeviceSenderFromEnvironment()],
+          notificationDeliveries,
         )
       : undefined);
 
