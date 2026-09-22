@@ -140,7 +140,7 @@ model NotificationDevice {
 
   user User @relation(fields: [userId], references: [id], onDelete: Restrict, onUpdate: Restrict)
 
-  @@unique([userId, provider, installationId], map: "notification_devices_user_provider_installation_unique")
+  @@unique([userId, provider, installationId], name: "notification_devices_user_provider_installation_unique", map: "notification_devices_user_provider_installation_unique")
   @@unique([provider, registrationToken], map: "notification_devices_provider_token_unique")
   @@index([userId, status], map: "notification_devices_user_status_idx")
   @@index([provider, platform, status], map: "notification_devices_provider_platform_status_idx")
