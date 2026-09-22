@@ -17,6 +17,7 @@ import { PostgresIdempotencyStore } from './idempotency-store.js';
 import { PostgresOutboxStore } from '../outbox/postgres-outbox-store.js';
 import type { DomainEventEnvelope } from '../../core/events/domain-event.js';
 import { OutboxRelay } from '../../core/outbox/outbox.js';
+import { OutboxWorker } from '../../core/outbox/outbox-worker.js';
 import { WalletNotFoundError } from '../../modules/wallets/prisma-wallet-repository.js';
 import { PrismaOrderRepository } from './order-repository.js';
 import { OrderEngine } from '../../modules/orders/order-engine.js';
@@ -36,6 +37,11 @@ export interface PrismaHopeHouseServerOptions {
     readonly prisma?: CreatePrismaClientOptions<PrismaHopeHouseClient>;
   };
   readonly notificationTransport?: NotificationTransport;
+  readonly notificationWorker?: {
+    readonly enabled?: boolean;
+    readonly intervalMs?: number;
+    readonly workerId?: string;
+  };
 }
 
 export interface PrismaHopeHouseServerComposition {
@@ -52,6 +58,7 @@ export interface PrismaHopeHouseServerComposition {
   readonly mobileMoneyRecharge: MobileMoneyRechargeUseCase;
   readonly receiptService: ReceiptService;
   processNotificationOutboxBatch(): Promise<number>;
+  readonly notificationWorker: OutboxWorker | null;
   close(): Promise<void>;
 }
 
@@ -91,6 +98,18 @@ export async function createPrismaHopeHouseServer(options: PrismaHopeHouseServer
   const notificationPublisher = notificationConsumer === null
     ? null
     : new OutboxNotificationPublisher(notificationConsumer);
+  const notificationRelay = notificationPublisher === null
+    ? null
+    : new OutboxRelay(new PostgresOutboxStore(client), notificationPublisher, {
+        workerId: options.notificationWorker?.workerId ?? 'notification-worker',
+        batchSize: 50,
+      });
+  const notificationWorker = notificationRelay === null
+    ? null
+    : new OutboxWorker(notificationRelay, {
+        intervalMs: options.notificationWorker?.intervalMs,
+        onError: (error) => console.error('Notification outbox worker failed', error),
+      });
 
   const orderRepository = new PrismaOrderRepository(client, auditRepository);
   const orderEngine = new OrderEngine({
@@ -196,15 +215,13 @@ export async function createPrismaHopeHouseServer(options: PrismaHopeHouseServer
     orderEngine,
     mobileMoneyRecharge,
     receiptService,
+    notificationWorker,
     async processNotificationOutboxBatch(): Promise<number> {
-      if (notificationPublisher === null) return 0;
-      const relay = new OutboxRelay(new PostgresOutboxStore(client), notificationPublisher, {
-        workerId: 'notification-worker',
-        batchSize: 50,
-      });
-      return relay.processBatch();
+      if (notificationRelay === null) return 0;
+      return notificationRelay.processBatch();
     },
     async close(): Promise<void> {
+      await notificationWorker?.stop();
       await new Promise<void>((resolve) => server.close(() => resolve()));
       await new Promise<void>((resolve) => baseServer.close(() => resolve()));
       await client.$disconnect();

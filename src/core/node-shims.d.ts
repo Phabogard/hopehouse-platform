@@ -75,6 +75,9 @@ declare class Buffer {
 declare const process: {
   env: Record<string, string | undefined>;
   cwd(): string;
+  readonly pid: number;
+  once(event: 'SIGTERM' | 'SIGINT', listener: () => void): void;
+  exitCode?: number;
 };
 
 declare const console: {
