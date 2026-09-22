@@ -1,4 +1,4 @@
-import { createSign } from 'node:crypto';
+import { createSign, randomUUID } from 'node:crypto';
 import type { NotificationDeviceRecord, NotificationDeviceRegistry } from './notification-device-registry.js';
 import type { NotificationTransport, SendNotificationInput, SentNotification } from './notification-transport.js';
 import { NotificationDeliveryInProgressError, type NotificationDeliveryRepository } from './notification-delivery.js';
@@ -251,6 +251,7 @@ export class NotificationDeviceFanoutTransport implements NotificationTransport 
 
       if (this.deliveryRepository !== undefined) {
         const claim = await this.deliveryRepository.claim({
+          id: randomUUID(),
           deduplicationKey: input.deduplicationKey,
           deviceId: device.id,
           provider: device.provider,
