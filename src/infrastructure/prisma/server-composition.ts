@@ -74,7 +74,6 @@ export async function createPrismaHopeHouseServer(options: PrismaHopeHouseServer
   const wallet = walletApiServiceFromUseCase(creditWalletUseCase);
   const mobileMoneyRecharge = new MobileMoneyRechargeUseCase(
     client,
-    walletRepository,
     idempotency,
     creditWalletUseCase,
   );
