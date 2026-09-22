@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { NotificationDeviceFanoutTransport, type NotificationDeviceSender } from '../src/modules/notifications/notification-device-dispatcher.js';
 import { NotificationDeviceRegistry, type NotificationDeviceRecord, type NotificationDeviceRepository } from '../src/modules/notifications/notification-device-registry.js';
+import type { NotificationDeliveryRepository } from '../src/modules/notifications/notification-delivery.js';
 
 function registryWith(records: NotificationDeviceRecord[]): NotificationDeviceRegistry {
   const repository: NotificationDeviceRepository = {
@@ -198,4 +199,105 @@ test('NotificationDeviceFanoutTransport revokes an FCM device after UNREGISTERED
     /token is no longer registered/,
   );
   assert.deepEqual(revoked, ['installation-invalid']);
+});
+
+
+class DeliveryLedger implements NotificationDeliveryRepository {
+  private readonly rows = new Map<string, 'sending' | 'sent' | 'failed'>();
+
+  async claim(input: { deduplicationKey: string; deviceId: string; provider: string; now: string }): Promise<'claimed' | 'sent' | 'sending'> {
+    const key = input.deduplicationKey + ':' + input.deviceId;
+    const existing = this.rows.get(key);
+    if (existing === 'sent' || existing === 'sending') return existing;
+    this.rows.set(key, 'sending');
+    return 'claimed';
+  }
+
+  async markSent(input: { deduplicationKey: string; deviceId: string; providerMessageId: string; now: string }): Promise<void> {
+    this.rows.set(input.deduplicationKey + ':' + input.deviceId, 'sent');
+  }
+
+  async markFailed(input: { deduplicationKey: string; deviceId: string; error: string; now: string }): Promise<void> {
+    this.rows.set(input.deduplicationKey + ':' + input.deviceId, 'failed');
+  }
+}
+
+test('NotificationDeviceFanoutTransport does not send the same device twice after a successful retry', async () => {
+  const ledger = new DeliveryLedger();
+  let sends = 0;
+  const sender: NotificationDeviceSender = {
+    provider: 'fcm',
+    async send() {
+      sends += 1;
+      return { id: 'fcm-message-1' };
+    },
+  };
+  const transport = new NotificationDeviceFanoutTransport(registryWith([device({ provider: 'fcm' })]), [sender], ledger);
+  const input = {
+    recipientId: 'user-1',
+    template: 'recharge_confirmed',
+    channel: 'push',
+    deduplicationKey: 'notification:retry-1',
+    payload: {},
+  };
+
+  await transport.send(input);
+  await transport.send(input);
+
+  assert.equal(sends, 1);
+});
+
+test('NotificationDeviceFanoutTransport rejects a concurrent delivery instead of duplicating the provider call', async () => {
+  const ledger = new DeliveryLedger();
+  let sends = 0;
+  let release: (() => void) | undefined;
+  const blocked = new Promise<void>((resolve) => { release = resolve; });
+  const sender: NotificationDeviceSender = {
+    provider: 'fcm',
+    async send() {
+      sends += 1;
+      await blocked;
+      return { id: 'fcm-message-2' };
+    },
+  };
+  const transport = new NotificationDeviceFanoutTransport(registryWith([device({ provider: 'fcm' })]), [sender], ledger);
+  const input = {
+    recipientId: 'user-1',
+    template: 'recharge_confirmed',
+    channel: 'push',
+    deduplicationKey: 'notification:concurrent-1',
+    payload: {},
+  };
+
+  const first = transport.send(input);
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  await assert.rejects(transport.send(input), /already in progress/);
+  assert.equal(sends, 1);
+  release?.();
+  await first;
+});
+
+test('NotificationDeviceFanoutTransport can retry a delivery after a known provider failure', async () => {
+  const ledger = new DeliveryLedger();
+  let sends = 0;
+  const sender: NotificationDeviceSender = {
+    provider: 'fcm',
+    async send() {
+      sends += 1;
+      if (sends === 1) throw new Error('temporary provider failure');
+      return { id: 'fcm-message-3' };
+    },
+  };
+  const transport = new NotificationDeviceFanoutTransport(registryWith([device({ provider: 'fcm' })]), [sender], ledger);
+  const input = {
+    recipientId: 'user-1',
+    template: 'recharge_confirmed',
+    channel: 'push',
+    deduplicationKey: 'notification:failure-1',
+    payload: {},
+  };
+
+  await assert.rejects(transport.send(input), /temporary provider failure/);
+  await transport.send(input);
+  assert.equal(sends, 2);
 });
