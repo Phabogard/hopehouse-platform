@@ -1,6 +1,7 @@
 import type { DomainEventEnvelope } from '../../core/events/domain-event.js';
 import type { IdempotencyStore } from '../../core/idempotency/idempotency.js';
 import type { NotificationTransport, SentNotification } from './notification-transport.js';
+import type { NotificationRecipientResolver } from './notification-recipient-resolver.js';
 
 export interface RechargeNotificationPayload {
   readonly rechargeAttemptId: string;
@@ -17,6 +18,7 @@ export class RechargeNotificationConsumer {
   constructor(
     private readonly transport: NotificationTransport,
     private readonly idempotencyStore: IdempotencyStore,
+    private readonly recipientResolver: NotificationRecipientResolver,
   ) {}
 
   async handle(event: DomainEventEnvelope<RechargeNotificationPayload>): Promise<{ processed: boolean; notification?: SentNotification }> {
@@ -29,10 +31,12 @@ export class RechargeNotificationConsumer {
     const existing = await this.idempotencyStore.find(key, operation);
     if (existing) return { processed: true };
 
+    const recipientId = await this.recipientResolver.resolveUserIdForWallet(event.payload.walletId);
+
     const notification = await this.transport.send({
-      recipientId: event.payload.walletId,
+      recipientId,
       template: 'recharge_confirmed',
-      channel: 'in_app',
+      channel: 'push',
       deduplicationKey: key,
       payload: {
         rechargeAttemptId: event.payload.rechargeAttemptId,

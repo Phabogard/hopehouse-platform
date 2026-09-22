@@ -31,6 +31,7 @@ import { RechargeNotificationConsumer } from '../../modules/notifications/rechar
 import { NotificationDeviceRegistry } from '../../modules/notifications/notification-device-registry.js';
 import { PrismaNotificationDeviceRepository } from './notification-device-repository.js';
 import type { NotificationTransport } from '../../modules/notifications/notification-transport.js';
+import { PrismaNotificationRecipientResolver } from './notification-recipient-resolver.js';
 
 type PrismaHopeHouseClient = PrismaClient & PrismaAuthRuntimeClient;
 
@@ -85,6 +86,7 @@ export async function createPrismaHopeHouseServer(options: PrismaHopeHouseServer
   const idempotency = new PostgresIdempotencyStore(client);
   const notificationDevices = new NotificationDeviceRegistry(new PrismaNotificationDeviceRepository(client));
   const walletRepository = new PrismaWalletRepository(client);
+  const notificationRecipientResolver = new PrismaNotificationRecipientResolver(walletRepository);
   const creditWalletUseCase = new CreditWalletUseCase({
     prisma: client,
     walletRepository,
@@ -98,7 +100,7 @@ export async function createPrismaHopeHouseServer(options: PrismaHopeHouseServer
 
   const notificationConsumer = options.notificationTransport === undefined
     ? null
-    : new RechargeNotificationConsumer(options.notificationTransport, idempotency);
+    : new RechargeNotificationConsumer(options.notificationTransport, idempotency, notificationRecipientResolver);
   const notificationPublisher = notificationConsumer === null
     ? null
     : new OutboxNotificationPublisher(notificationConsumer);

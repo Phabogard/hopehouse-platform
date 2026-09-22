@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { RechargeNotificationConsumer } from '../src/modules/notifications/recharge-notification-consumer.js';
 import { InMemoryNotificationTransport } from '../src/modules/notifications/notification-transport.js';
+import type { NotificationRecipientResolver } from '../src/modules/notifications/notification-recipient-resolver.js';
 import type { IdempotencyRecord, IdempotencyStore } from '../src/core/idempotency/idempotency.js';
 
 class Store implements IdempotencyStore {
@@ -14,6 +15,16 @@ class Store implements IdempotencyStore {
     if (this.rows.has(key)) return false;
     this.rows.set(key, record);
     return true;
+  }
+}
+
+class Resolver implements NotificationRecipientResolver {
+  calls = 0;
+
+  async resolveUserIdForWallet(walletId: string): Promise<string> {
+    this.calls += 1;
+    assert.equal(walletId, 'wal-1');
+    return 'user-1';
   }
 }
 
@@ -38,30 +49,44 @@ const event = {
   },
 };
 
+test('RechargeNotificationConsumer resolves wallet owner before sending', async () => {
+  const transport = new InMemoryNotificationTransport();
+  const resolver = new Resolver();
+  const consumer = new RechargeNotificationConsumer(transport, new Store(), resolver);
+
+  await consumer.handle(event);
+
+  assert.equal(resolver.calls, 1);
+  assert.equal(transport.sent[0]?.recipientId, 'user-1');
+  assert.equal(transport.sent[0]?.channel, 'push');
+  assert.equal(transport.sent[0]?.template, 'recharge_confirmed');
+});
+
 test('RechargeNotificationConsumer is idempotent on redelivery', async () => {
   const transport = new InMemoryNotificationTransport();
-  const consumer = new RechargeNotificationConsumer(transport, new Store());
+  const resolver = new Resolver();
+  const consumer = new RechargeNotificationConsumer(transport, new Store(), resolver);
 
   await consumer.handle(event);
   await consumer.handle(event);
 
   assert.equal(transport.sent.length, 1);
-  assert.equal(transport.sent[0]?.recipientId, 'wal-1');
-  assert.equal(transport.sent[0]?.template, 'recharge_confirmed');
+  assert.equal(resolver.calls, 1);
 });
 
 test('RechargeNotificationConsumer ignores unrelated events', async () => {
   const transport = new InMemoryNotificationTransport();
-  const consumer = new RechargeNotificationConsumer(transport, new Store());
+  const resolver = new Resolver();
+  const consumer = new RechargeNotificationConsumer(transport, new Store(), resolver);
   const result = await consumer.handle({ ...event, eventType: 'wallet.recharge_credited' } as unknown as typeof event);
   assert.equal(result.processed, false);
   assert.equal(transport.sent.length, 0);
+  assert.equal(resolver.calls, 0);
 });
-
 
 test('RechargeNotificationConsumer remains single-delivery under concurrent redelivery when transport deduplicates by key', async () => {
   const transport = new ConcurrentDeduplicatingTransport();
-  const consumer = new RechargeNotificationConsumer(transport, new Store());
+  const consumer = new RechargeNotificationConsumer(transport, new Store(), new Resolver());
 
   const results = await Promise.all([consumer.handle(event), consumer.handle(event)]);
 
