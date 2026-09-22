@@ -4,7 +4,6 @@ import { DomainError, ValidationError } from '../../core/errors.js';
 import { PostgresIdempotencyStore } from '../../infrastructure/prisma/idempotency-store.js';
 import { PrismaAuditLogRepository } from '../../infrastructure/prisma/audit-log-repository.js';
 import { PostgresOutboxStore } from '../../infrastructure/outbox/postgres-outbox-store.js';
-import { PrismaWalletRepository } from './prisma-wallet-repository.js';
 import { CreditWalletUseCase } from './credit-wallet-use-case.js';
 
 const CREATE_OPERATION = 'wallet.recharge.create';
@@ -69,7 +68,6 @@ function isFinal(status: MobileMoneyRechargeStatus): boolean {
 export class MobileMoneyRechargeUseCase {
   constructor(
     private readonly prisma: RechargeClient,
-    private readonly walletRepository: PrismaWalletRepository,
     private readonly idempotencyStore: PostgresIdempotencyStore,
     private readonly creditWallet: CreditWalletUseCase,
   ) {}
