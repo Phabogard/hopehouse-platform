@@ -91,8 +91,10 @@ export class MobileMoneyRechargeUseCase {
       const attempt = await this.prisma.mobileMoneyRechargeAttempt.findUnique({
         where: { id: existing.resultReference },
       });
-      if (attempt) const receipt = await this.prisma.walletReceipt.findUnique({ where: { rechargeAttemptId: attempt.id } });
-      return { attempt: attempt as unknown as Record<string, unknown>, receipt: receipt as unknown as Record<string, unknown> | undefined, replayed: true };
+      if (attempt) {
+        const receipt = await this.prisma.walletReceipt.findUnique({ where: { rechargeAttemptId: attempt.id } });
+        return { attempt: attempt as unknown as Record<string, unknown>, receipt: receipt as unknown as Record<string, unknown> | undefined, replayed: true };
+      }
     }
 
     const attemptId = randomUUID();
@@ -109,8 +111,10 @@ export class MobileMoneyRechargeUseCase {
         const winner = await store.find(command.idempotencyKey, CREATE_OPERATION);
         if (winner?.resultReference) {
           const attempt = await tx.mobileMoneyRechargeAttempt.findUnique({ where: { id: winner.resultReference } });
-          if (attempt) const receipt = await tx.walletReceipt.findUnique({ where: { rechargeAttemptId: attempt.id } });
-          return { attempt: attempt as unknown as Record<string, unknown>, receipt: receipt as unknown as Record<string, unknown> | undefined, replayed: true };
+          if (attempt) {
+            const receipt = await tx.walletReceipt.findUnique({ where: { rechargeAttemptId: attempt.id } });
+            return { attempt: attempt as unknown as Record<string, unknown>, receipt: receipt as unknown as Record<string, unknown> | undefined, replayed: true };
+          }
         }
         throw new Error('Recharge idempotency conflict without a retrievable result');
       }
