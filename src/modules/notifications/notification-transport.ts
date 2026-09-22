@@ -3,7 +3,8 @@ export interface SendNotificationInput {
   readonly template: string;
   readonly channel: string;
   readonly payload: Readonly<Record<string, unknown>>;
-  readonly deduplicationKey?: string;
+  /** Stable provider-level idempotency key. External providers MUST deduplicate on this key. */
+  readonly deduplicationKey: string;
 }
 
 export interface SentNotification {
@@ -16,6 +17,7 @@ export interface SentNotification {
 }
 
 export interface NotificationTransport {
+  /** Concurrent retries with the same key MUST NOT create a second external notification. */
   send(input: SendNotificationInput): Promise<SentNotification>;
 }
 
@@ -23,7 +25,7 @@ export class InMemoryNotificationTransport implements NotificationTransport {
   readonly sent: SentNotification[] = [];
 
   async send(input: SendNotificationInput): Promise<SentNotification> {
-    if (input.deduplicationKey !== undefined) {
+    {
       const existing = this.sent.find((item) => item.payload.deduplicationKey === input.deduplicationKey);
       if (existing) return existing;
     }
@@ -33,7 +35,7 @@ export class InMemoryNotificationTransport implements NotificationTransport {
       recipientId: input.recipientId,
       template: input.template,
       channel: input.channel,
-      payload: Object.freeze({ ...input.payload, ...(input.deduplicationKey ? { deduplicationKey: input.deduplicationKey } : {}) }),
+      payload: Object.freeze({ ...input.payload, ...{ deduplicationKey: input.deduplicationKey } }),
       sentAt: new Date().toISOString(),
     });
     this.sent.push(record);

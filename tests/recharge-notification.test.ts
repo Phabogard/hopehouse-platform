@@ -57,3 +57,34 @@ test('RechargeNotificationConsumer ignores unrelated events', async () => {
   assert.equal(result.processed, false);
   assert.equal(transport.sent.length, 0);
 });
+
+
+test('RechargeNotificationConsumer remains single-delivery under concurrent redelivery when transport deduplicates by key', async () => {
+  const transport = new ConcurrentDeduplicatingTransport();
+  const consumer = new RechargeNotificationConsumer(transport, new Store());
+
+  const results = await Promise.all([consumer.handle(event), consumer.handle(event)]);
+
+  assert.equal(results.length, 2);
+  assert.equal(results.every((result) => result.processed), true);
+  assert.equal(transport.sent.length, 1);
+});
+
+class ConcurrentDeduplicatingTransport extends InMemoryNotificationTransport {
+  private barrier: Promise<void> | null = null;
+  private releaseBarrier: (() => void) | null = null;
+
+  override async send(input: Parameters<InMemoryNotificationTransport['send']>[0]) {
+    if (this.barrier === null) {
+      this.barrier = new Promise<void>((resolve) => {
+        this.releaseBarrier = resolve;
+      });
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      this.releaseBarrier?.();
+    } else {
+      this.releaseBarrier?.();
+    }
+    await this.barrier;
+    return super.send(input);
+  }
+}
