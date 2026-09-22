@@ -172,7 +172,7 @@ export async function createPrismaHopeHouseServer(options: PrismaHopeHouseServer
     createIdempotencyStore: (tx: unknown) => new PostgresIdempotencyStore(tx as Prisma.TransactionClient),
   });
 
-  const baseServer = createHopeHouseServer({ authRuntime, audit, orderRepository, orderEngine });
+  const baseServer = createHopeHouseServer({ authRuntime, audit, orderRepository, orderEngine, notificationDevices });
   const server = createServer((request, response) => {
     const pathname = new URL(request.url ?? '/', 'http://localhost').pathname;
     if (pathname.startsWith('/catalogue/')) {

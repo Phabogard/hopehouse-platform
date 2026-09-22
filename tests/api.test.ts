@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createHopeHouseServer } from '../src/app.js';
+import { NotificationDeviceRegistry, type NotificationDeviceRecord, type NotificationDeviceRepository } from '../src/modules/notifications/notification-device-registry.js';
 
 const authOptions = { auth: { jwtSecret: 'api-test-jwt-secret', bootstrapPassword: 'test-password' } } as const;
 
@@ -413,4 +414,92 @@ test('auditor remains read-only for global audit and cannot create business data
     });
     assert.equal(createBeneficiary.status, 403);
   }, { authRuntime: authRuntimeForRole('auditor') });
+});
+
+
+function notificationDeviceRegistryForApiTests(): NotificationDeviceRegistry {
+  const records = new Map<string, NotificationDeviceRecord>();
+  const repository: NotificationDeviceRepository = {
+    async upsertActive(input) {
+      const existing = [...records.values()].find((record) => record.userId === input.userId && record.provider === input.provider && record.installationId === input.installationId);
+      const record: NotificationDeviceRecord = {
+        id: existing?.id ?? 'device-api-1',
+        userId: input.userId,
+        provider: input.provider,
+        platform: input.platform,
+        installationId: input.installationId,
+        registrationToken: input.registrationToken,
+        status: 'active',
+        createdAt: existing?.createdAt ?? input.now,
+        updatedAt: input.now,
+        lastSeenAt: input.now,
+        revokedAt: null,
+        metadata: input.metadata ?? {},
+      };
+      records.set(record.id, record);
+      return record;
+    },
+    async revoke(input) {
+      const record = [...records.values()].find((entry) => entry.userId === input.userId && entry.provider === input.provider && entry.installationId === input.installationId);
+      if (record === undefined || record.status !== 'active') return false;
+      records.set(record.id, { ...record, status: 'revoked', revokedAt: input.now, updatedAt: input.now });
+      return true;
+    },
+    async listActive(input) {
+      return [...records.values()].filter((record) => record.userId === input.userId && record.status === 'active' && (input.provider === undefined || record.provider === input.provider));
+    },
+  };
+  return new NotificationDeviceRegistry(repository);
+}
+
+test('notification device HTTP API binds ownership to the authenticated actor and never returns the registration token', async () => {
+  const registry = notificationDeviceRegistryForApiTests();
+  await withServer(async (baseUrl) => {
+    const createResponse = await fetch(baseUrl + '/notification-devices', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: 'Bearer client-access-token' },
+      body: JSON.stringify({
+        userId: 'spoofed-user',
+        provider: 'fcm',
+        platform: 'android',
+        installationId: 'installation-api-1',
+        registrationToken: 'secret-token-api-1',
+        metadata: { appVersion: '1.0.0' },
+      }),
+    });
+    const created = await createResponse.json() as { data: { id: string; provider: string; installationId: string; metadata: Record<string, unknown>; registrationToken?: string } };
+    assert.equal(createResponse.status, 201);
+    assert.equal(created.data.id, 'device-api-1');
+    assert.equal(created.data.provider, 'fcm');
+    assert.equal(created.data.installationId, 'installation-api-1');
+    assert.deepEqual(created.data.metadata, { appVersion: '1.0.0' });
+    assert.equal('registrationToken' in created.data, false);
+
+    const listResponse = await fetch(baseUrl + '/notification-devices', { headers: bearer('client-access-token') });
+    const listed = await listResponse.json() as { data: Array<{ id: string; installationId: string; registrationToken?: string }> };
+    assert.equal(listResponse.status, 200);
+    assert.equal(listed.data.length, 1);
+    assert.equal(listed.data[0]?.id, 'device-api-1');
+    assert.equal('registrationToken' in (listed.data[0] ?? {}), false);
+
+    const revokeResponse = await fetch(baseUrl + '/notification-devices/fcm/installation-api-1', { method: 'DELETE', headers: bearer('client-access-token') });
+    const revoked = await revokeResponse.json() as { data: { revoked: boolean } };
+    assert.equal(revokeResponse.status, 200);
+    assert.equal(revoked.data.revoked, true);
+
+    const emptyResponse = await fetch(baseUrl + '/notification-devices', { headers: bearer('client-access-token') });
+    const empty = await emptyResponse.json() as { data: unknown[] };
+    assert.equal(emptyResponse.status, 200);
+    assert.equal(empty.data.length, 0);
+  }, { authRuntime: authRuntimeForRole('client'), notificationDevices: registry });
+});
+
+test('notification device HTTP API requires authentication', async () => {
+  const registry = notificationDeviceRegistryForApiTests();
+  await withServer(async (baseUrl) => {
+    const response = await fetch(baseUrl + '/notification-devices');
+    const body = await response.json() as { error: { code: string } };
+    assert.equal(response.status, 401);
+    assert.equal(body.error.code, 'UNAUTHORIZED');
+  }, { authRuntime: authRuntimeForRole('client'), notificationDevices: registry });
 });
