@@ -44,6 +44,7 @@ type RechargeClient = PrismaClient & {
 export interface MobileMoneyRechargeResult {
   readonly attempt: Record<string, unknown>;
   readonly replayed: boolean;
+  readonly receipt?: Record<string, unknown>;
 }
 
 function validateAmount(value: number): void {
@@ -90,7 +91,10 @@ export class MobileMoneyRechargeUseCase {
       const attempt = await this.prisma.mobileMoneyRechargeAttempt.findUnique({
         where: { id: existing.resultReference },
       });
-      if (attempt) return { attempt: attempt as unknown as Record<string, unknown>, replayed: true };
+      if (attempt) {
+        const receipt = await this.prisma.walletReceipt.findUnique({ where: { rechargeAttemptId: attempt.id } });
+        return { attempt: attempt as unknown as Record<string, unknown>, receipt: receipt as unknown as Record<string, unknown> | undefined, replayed: true };
+      }
     }
 
     const attemptId = randomUUID();
@@ -107,7 +111,10 @@ export class MobileMoneyRechargeUseCase {
         const winner = await store.find(command.idempotencyKey, CREATE_OPERATION);
         if (winner?.resultReference) {
           const attempt = await tx.mobileMoneyRechargeAttempt.findUnique({ where: { id: winner.resultReference } });
-          if (attempt) return { attempt: attempt as unknown as Record<string, unknown>, replayed: true };
+          if (attempt) {
+            const receipt = await tx.walletReceipt.findUnique({ where: { rechargeAttemptId: attempt.id } });
+            return { attempt: attempt as unknown as Record<string, unknown>, receipt: receipt as unknown as Record<string, unknown> | undefined, replayed: true };
+          }
         }
         throw new Error('Recharge idempotency conflict without a retrievable result');
       }
@@ -264,9 +271,27 @@ export class MobileMoneyRechargeUseCase {
         },
       });
 
+      const receipt = await tx.walletReceipt.create({
+        data: {
+          id: randomUUID(),
+          rechargeAttemptId: attempt.id,
+          orderId: attempt.orderId,
+          walletId: attempt.walletId,
+          receiptNumber: `RCH-${attempt.id}`,
+          amountCents: BigInt(requestedAmount),
+          currency: requestedCurrency,
+          issuedAt: new Date(),
+          metadataJson: {
+            source: 'mobile_money_recharge',
+            externalReference: reference,
+            network: attempt.network,
+          } as Prisma.InputJsonValue,
+        },
+      });
+
       const credited = await tx.mobileMoneyRechargeAttempt.update({
         where: { id: attempt.id },
-        data: { status: 'WALLET_CREDITED' },
+        data: { status: 'RECEIPT_ISSUED' },
       });
 
       const audit = new PrismaAuditLogRepository(tx);
@@ -305,7 +330,47 @@ export class MobileMoneyRechargeUseCase {
         },
       });
 
-      return { attempt: credited as unknown as Record<string, unknown>, replayed: credit.replayed };
+      await new PostgresOutboxStore(tx).append({
+        eventId: randomUUID(),
+        eventType: 'wallet.recharge_receipt_issued',
+        schemaVersion: 1,
+        occurredAt: new Date().toISOString(),
+        correlationId: attempt.id,
+        causationId: null,
+        aggregateId: attempt.walletId,
+        aggregateType: 'wallet',
+        payload: {
+          rechargeAttemptId: attempt.id,
+          walletId: attempt.walletId,
+          orderId: attempt.orderId,
+          receiptId: receipt.id,
+          receiptNumber: receipt.receiptNumber,
+          amountCents: requestedAmount,
+          currency: requestedCurrency,
+        },
+      });
+      await new PostgresOutboxStore(tx).append({
+        eventId: randomUUID(),
+        eventType: 'wallet.recharge_notification_requested',
+        schemaVersion: 1,
+        occurredAt: new Date().toISOString(),
+        correlationId: attempt.id,
+        causationId: null,
+        aggregateId: attempt.walletId,
+        aggregateType: 'wallet',
+        payload: {
+          rechargeAttemptId: attempt.id,
+          walletId: attempt.walletId,
+          orderId: attempt.orderId,
+          receiptId: receipt.id,
+          receiptNumber: receipt.receiptNumber,
+          amountCents: requestedAmount,
+          currency: requestedCurrency,
+          type: 'recharge_confirmed',
+        },
+      });
+
+      return { attempt: credited as unknown as Record<string, unknown>, receipt: receipt as unknown as Record<string, unknown>, replayed: credit.replayed };
       });
     } catch (error) {
       if (isUniqueConstraintViolation(error) && command.externalReference !== undefined) {
