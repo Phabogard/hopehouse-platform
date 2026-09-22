@@ -57,6 +57,7 @@ export interface CreditWalletCommand {
   readonly amountCents: number;
   readonly actorId: string;
   readonly idempotencyKey: string;
+  readonly idempotencyOperation?: string;
   readonly transactionKey?: string;
   readonly relatedEntityType?: string;
   readonly relatedEntityId?: string;
@@ -127,120 +128,94 @@ export class CreditWalletUseCase {
   constructor(private readonly deps: CreditWalletDependencies) {}
 
   async execute(command: CreditWalletCommand): Promise<CreditWalletResult> {
+    const operation = command.idempotencyOperation ?? CREDIT_WALLET_OPERATION;
     if (command.idempotencyKey.trim().length === 0) {
       throw new ValidationError("L'en-tête Idempotency-Key est obligatoire pour un crédit de wallet");
     }
     validateAmount(command.amountCents);
 
-    // Fast-path: avoid opening a transaction for a pure replay.
-    const existingRecord = await this.deps.idempotencyStore.find(command.idempotencyKey, CREDIT_WALLET_OPERATION);
+    const existingRecord = await this.deps.idempotencyStore.find(command.idempotencyKey, operation);
     if (existingRecord?.resultReference) {
       const existingTransaction = await this.deps.walletRepository.getTransactionById(existingRecord.resultReference);
-      if (existingTransaction) {
-        return { transaction: existingTransaction, replayed: true };
-      }
+      if (existingTransaction) return { transaction: existingTransaction, replayed: true };
     }
 
-    const reservedTransactionId = randomUUID();
-
     try {
-      const result = await this.deps.prisma.$transaction(async (tx): Promise<CreditWalletResult> => {
-        const idempotencyStore = this.deps.createIdempotencyStore(tx);
-
-        // 1. Atomic idempotency claim — MUST happen before any mutation.
-        const won = await idempotencyStore.save({
-          key: command.idempotencyKey,
-          operation: CREDIT_WALLET_OPERATION,
-          resultReference: reservedTransactionId,
-          createdAt: new Date().toISOString(),
-        });
-
-        if (!won) {
-          // Someone else already claimed this idempotencyKey. No wallet
-          // mutation, no WalletTransaction, no Outbox write — we only
-          // read and return their result.
-          const existing = await idempotencyStore.find(command.idempotencyKey, CREDIT_WALLET_OPERATION);
-          if (existing?.resultReference) {
-            const existingTransaction = await this.deps.walletRepository.getTransactionById(existing.resultReference);
-            if (existingTransaction) {
-              return { transaction: existingTransaction, replayed: true };
-            }
-          }
-          // Defensive only: under PostgreSQL's read-committed semantics a
-          // lost save() implies the winner has already committed, so its
-          // record should always be visible here. Surfacing a clear error
-          // is safer than silently crediting again if this invariant is
-          // ever violated (e.g. a future change to the isolation level).
-          throw new Error(
-            `IdempotencyRecord conflict for key=${command.idempotencyKey} operation=${CREDIT_WALLET_OPERATION} but no retrievable prior result was found`,
-          );
-        }
-
-        // 2. Wallet mutation. If a concurrent request is racing on the same
-        //    transactionKey, PostgreSQL's unique partial index on
-        //    wallet_transactions(wallet_id, transaction_key) makes exactly
-        //    one of the two INSERTs succeed; the other blocks and then
-        //    raises P2002 once the winner commits (see catch block below).
-        const walletTransaction = await this.deps.walletRepository.creditWithinTransaction(tx, {
-          transactionId: reservedTransactionId,
-          walletId: command.walletId,
-          currency: command.currency,
-          amountCents: command.amountCents,
-          actorId: command.actorId,
-          transactionKey: command.transactionKey,
-          relatedEntityType: command.relatedEntityType,
-          relatedEntityId: command.relatedEntityId,
-          metadata: command.metadata,
-        });
-
-        if (walletTransaction.id !== reservedTransactionId) {
-          // creditWithinTransaction's own transactionKey pre-check found a
-          // pre-existing WalletTransaction created under a different
-          // idempotencyKey. This is a business collision, not something to
-          // recover from — see the rule and rationale documented above
-          // isWalletTransactionKeyConflict. Throwing here rolls back the
-          // whole transaction (including the IdempotencyRecord insert
-          // above), leaving nothing behind for this attempt.
-          throw new TransactionKeyConflictError(command.walletId, command.transactionKey as string);
-        }
-
-        // 3. Domain event, written to Outbox in the SAME transaction.
-        const outboxStore = this.deps.createOutboxStore(tx);
-        const correlationId = command.correlationId ?? command.idempotencyKey;
-        const event = createWalletCreditedEvent({
-          eventId: randomUUID(),
-          occurredAt: walletTransaction.occurredAt,
-          correlationId,
-          causationId: null,
-          payload: {
-            walletId: walletTransaction.walletId,
-            transactionId: walletTransaction.id,
-            currency: walletTransaction.currency,
-            amountCents: walletTransaction.amountCents,
-            actorId: walletTransaction.actorId,
-            relatedEntityType: walletTransaction.relatedEntityType,
-            relatedEntityId: walletTransaction.relatedEntityId,
-          },
-        });
-        await outboxStore.append(event);
-
-        return { transaction: walletTransaction, replayed: false };
-      });
-
-      return result;
+      return await this.deps.prisma.$transaction(async (tx) =>
+        this.executeWithinTransaction(tx, command),
+      );
     } catch (err) {
       if (isWalletTransactionKeyConflict(err) && command.transactionKey) {
-        // Real concurrent race: two different idempotencyKeys raced on the
-        // same caller-supplied business transactionKey and PostgreSQL's
-        // unique partial index let exactly one INSERT through. This is the
-        // other one. The whole transaction (including this attempt's own
-        // IdempotencyRecord insert) has already been rolled back by
-        // PostgreSQL — nothing is repaired or replayed here, this
-        // idempotencyKey is simply reported as failed and remains free to
-        // retry with a different transactionKey.
         throw new TransactionKeyConflictError(command.walletId, command.transactionKey);
       }
       throw err;
     }
+  }
+
+  async executeWithinTransaction(
+    tx: WalletCreditTransactionClient,
+    command: CreditWalletCommand,
+  ): Promise<CreditWalletResult> {
+    const operation = command.idempotencyOperation ?? CREDIT_WALLET_OPERATION;
+    if (command.idempotencyKey.trim().length === 0) {
+      throw new ValidationError("L'en-tête Idempotency-Key est obligatoire pour un crédit de wallet");
+    }
+    validateAmount(command.amountCents);
+
+    const idempotencyStore = this.deps.createIdempotencyStore(tx);
+    const reservedTransactionId = randomUUID();
+    const won = await idempotencyStore.save({
+      key: command.idempotencyKey,
+      operation,
+      resultReference: reservedTransactionId,
+      createdAt: new Date().toISOString(),
+    });
+
+    if (!won) {
+      const existing = await idempotencyStore.find(command.idempotencyKey, operation);
+      if (existing?.resultReference) {
+        const existingTransaction = await this.deps.walletRepository.getTransactionById(existing.resultReference);
+        if (existingTransaction) return { transaction: existingTransaction, replayed: true };
+      }
+      throw new Error(
+        `IdempotencyRecord conflict for key=${command.idempotencyKey} operation=${operation} but no retrievable prior result was found`,
+      );
+    }
+
+    const walletTransaction = await this.deps.walletRepository.creditWithinTransaction(tx, {
+      transactionId: reservedTransactionId,
+      walletId: command.walletId,
+      currency: command.currency,
+      amountCents: command.amountCents,
+      actorId: command.actorId,
+      transactionKey: command.transactionKey,
+      relatedEntityType: command.relatedEntityType,
+      relatedEntityId: command.relatedEntityId,
+      metadata: command.metadata,
+    });
+
+    if (walletTransaction.id !== reservedTransactionId) {
+      throw new TransactionKeyConflictError(command.walletId, command.transactionKey as string);
+    }
+
+    const outboxStore = this.deps.createOutboxStore(tx);
+    const event = createWalletCreditedEvent({
+      eventId: randomUUID(),
+      occurredAt: walletTransaction.occurredAt,
+      correlationId: command.correlationId ?? command.idempotencyKey,
+      causationId: null,
+      payload: {
+        walletId: walletTransaction.walletId,
+        transactionId: walletTransaction.id,
+        currency: walletTransaction.currency,
+        amountCents: walletTransaction.amountCents,
+        actorId: walletTransaction.actorId,
+        relatedEntityType: walletTransaction.relatedEntityType,
+        relatedEntityId: walletTransaction.relatedEntityId,
+      },
+    });
+    await outboxStore.append(event);
+
+    return { transaction: walletTransaction, replayed: false };
   }
 }
