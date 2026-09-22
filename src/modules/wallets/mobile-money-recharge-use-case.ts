@@ -66,6 +66,10 @@ function isFinal(status: MobileMoneyRechargeStatus): boolean {
   return status === 'WALLET_CREDITED' || status === 'RECEIPT_ISSUED';
 }
 
+function isUniqueConstraintViolation(error: unknown): boolean {
+  return error instanceof Error && 'code' in error && (error as { code?: unknown }).code === 'P2002';
+}
+
 export class MobileMoneyRechargeUseCase {
   constructor(
     private readonly prisma: RechargeClient,
@@ -90,7 +94,8 @@ export class MobileMoneyRechargeUseCase {
     }
 
     const attemptId = randomUUID();
-    return this.prisma.$transaction(async (tx) => {
+    try {
+      return await this.prisma.$transaction(async (tx) => {
       const store = new PostgresIdempotencyStore(tx);
       const won = await store.save({
         key: command.idempotencyKey,
@@ -137,8 +142,14 @@ export class MobileMoneyRechargeUseCase {
           metadataJson: (command.metadata ?? {}) as Prisma.InputJsonValue,
         },
       });
-      return { attempt: attempt as unknown as Record<string, unknown>, replayed: false };
-    });
+        return { attempt: attempt as unknown as Record<string, unknown>, replayed: false };
+      });
+    } catch (error) {
+      if (isUniqueConstraintViolation(error) && command.externalReference !== undefined) {
+        throw new RechargeConflictError('La référence externe est déjà utilisée par une autre tentative de recharge');
+      }
+      throw error;
+    }
   }
 
   async confirm(command: ConfirmRechargeCommand): Promise<MobileMoneyRechargeResult> {
@@ -148,7 +159,8 @@ export class MobileMoneyRechargeUseCase {
       throw new ValidationError("L'en-tête Idempotency-Key est obligatoire");
     }
 
-    return this.prisma.$transaction(async (tx) => {
+    try {
+      return await this.prisma.$transaction(async (tx) => {
       const rows = await tx.$queryRaw<Array<{ id: string }>>`
         SELECT "id" FROM "mobile_money_recharge_attempts"
         WHERE "id" = ${command.attemptId}
@@ -294,6 +306,12 @@ export class MobileMoneyRechargeUseCase {
       });
 
       return { attempt: credited as unknown as Record<string, unknown>, replayed: credit.replayed };
-    });
+      });
+    } catch (error) {
+      if (isUniqueConstraintViolation(error) && command.externalReference !== undefined) {
+        throw new RechargeConflictError('La référence externe est déjà utilisée par une autre tentative de recharge');
+      }
+      throw error;
+    }
   }
 }
