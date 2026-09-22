@@ -34,7 +34,7 @@ export interface NotificationDeviceRepository {
 export class NotificationDeviceRegistry {
   constructor(private readonly repository: NotificationDeviceRepository) {}
 
-  register(input: RegisterNotificationDeviceInput): Promise<NotificationDeviceRecord> {
+  async register(input: RegisterNotificationDeviceInput): Promise<NotificationDeviceRecord> {
     const now = input.now ?? new Date().toISOString();
     if (!input.userId.trim()) throw new Error('Notification device userId is required');
     if (!input.provider.trim()) throw new Error('Notification device provider is required');
