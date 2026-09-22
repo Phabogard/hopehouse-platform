@@ -1,6 +1,7 @@
 import { createSign } from 'node:crypto';
 import type { NotificationDeviceRecord, NotificationDeviceRegistry } from './notification-device-registry.js';
 import type { NotificationTransport, SendNotificationInput, SentNotification } from './notification-transport.js';
+import { NotificationDeliveryInProgressError, type NotificationDeliveryRepository } from './notification-delivery.js';
 
 const GOOGLE_TOKEN_ENDPOINT = 'https://oauth2.googleapis.com/token';
 const FCM_SCOPE = 'https://www.googleapis.com/auth/firebase.messaging';
@@ -231,6 +232,7 @@ export class NotificationDeviceFanoutTransport implements NotificationTransport 
   constructor(
     private readonly registry: NotificationDeviceRegistry,
     senders: readonly NotificationDeviceSender[],
+    private readonly deliveryRepository?: NotificationDeliveryRepository,
   ) {
     this.senders = new Map(senders.map((sender) => [sender.provider, sender]));
   }
@@ -241,13 +243,56 @@ export class NotificationDeviceFanoutTransport implements NotificationTransport 
       throw new Error(`No active notification devices for recipient ${input.recipientId}`);
     }
 
-    const deliveries = devices.map(async (device) => {
+    const sentResults = await Promise.all(devices.map(async (device) => {
       const sender = this.senders.get(device.provider);
       if (sender === undefined) {
         throw new Error(`No notification sender configured for provider ${device.provider}`);
       }
+
+      if (this.deliveryRepository !== undefined) {
+        const claim = await this.deliveryRepository.claim({
+          deduplicationKey: input.deduplicationKey,
+          deviceId: device.id,
+          provider: device.provider,
+          now: new Date().toISOString(),
+        });
+        if (claim === 'sent') return { skipped: true };
+        if (claim === 'sending') {
+          throw new NotificationDeliveryInProgressError(input.deduplicationKey, device.id);
+        }
+
+        try {
+          const result = await sender.send({ device, notification: input });
+          await this.deliveryRepository.markSent({
+            deduplicationKey: input.deduplicationKey,
+            deviceId: device.id,
+            providerMessageId: result.id,
+            now: new Date().toISOString(),
+          });
+          return { skipped: false };
+        } catch (error: unknown) {
+          await this.deliveryRepository.markFailed({
+            deduplicationKey: input.deduplicationKey,
+            deviceId: device.id,
+            error: error instanceof Error ? error.message : String(error),
+            now: new Date().toISOString(),
+          });
+          if (
+            error instanceof FcmNotificationError &&
+            error.providerStatus === 'UNREGISTERED'
+          ) {
+            await this.registry.revoke({
+              userId: device.userId,
+              provider: device.provider,
+              installationId: device.installationId,
+            });
+          }
+          throw error;
+        }
+      }
+
       try {
-        return await sender.send({ device, notification: input });
+        return { skipped: false, result: await sender.send({ device, notification: input }) };
       } catch (error: unknown) {
         if (
           error instanceof FcmNotificationError &&
@@ -261,10 +306,10 @@ export class NotificationDeviceFanoutTransport implements NotificationTransport 
         }
         throw error;
       }
-    });
+    }));
 
-    const results = await Promise.all(deliveries);
     const sentAt = new Date().toISOString();
+    const deliveryCount = sentResults.filter((result) => !result.skipped).length;
 
     return Object.freeze({
       id: `notification:${input.deduplicationKey}`,
@@ -273,7 +318,7 @@ export class NotificationDeviceFanoutTransport implements NotificationTransport 
       channel: input.channel,
       payload: Object.freeze({
         ...input.payload,
-        deliveryCount: results.length,
+        deliveryCount,
       }),
       sentAt,
     });
