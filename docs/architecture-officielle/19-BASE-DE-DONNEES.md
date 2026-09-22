@@ -10,7 +10,7 @@ roles, permissions, role_permissions, users, beneficiaries, services, subscripti
 
 ## Tables cibles déjà esquissées dans le SQL
 
-client_profiles, agent_profiles, catalogs, catalog_items, networks, providers, service_definitions, service_modes, price_rules, commission_rules, wallets, wallet_balances, wallet_transactions, orders, order_items, order_steps, order_attempts, order_history, notifications, receipts, connectors et connector_bindings.
+client_profiles, agent_profiles, catalogs, catalog_items, networks, providers, service_definitions, service_modes, price_rules, commission_rules, wallets, wallet_balances, wallet_transactions, orders, order_items, order_steps, order_attempts, order_transitions, notifications, receipts, connectors et connector_bindings.
 
 ## Tables futures obligatoires non encore présentes
 
@@ -53,7 +53,7 @@ Catalogues : catalogs, catalog_items, networks, providers, service_definitions, 
 
 Wallets : wallets, wallet_balances, wallet_transactions. Rôle : gérer solde disponible/réservé par devise, mouvements numériques, commissions, corrections, réservations et rollback. Contraintes : solde non négatif, devise active, type de transaction contrôlé, idempotence cible.
 
-Commandes : orders, order_items, order_steps, order_attempts, order_history. Rôle : moteur universel. Contraintes : cycle incluant payment, statuts contrôlés, historique append-only, tentatives refusées conservées.
+Commandes : orders, order_items, order_steps, order_attempts, order_transitions. Rôle : moteur universel. Contraintes : cycle incluant payment, statuts contrôlés, historique append-only, tentatives refusées conservées. `order_transitions` est la table canonique d'historique de transitions persistées ; `history` reste une étape du cycle de commande, pas une table distincte.
 
 Notifications, receipts, connectors, connector_bindings : rôle : notification, preuve de transaction et intégrations techniques indépendantes. Contraintes : statut, liens entité, configuration protégée.
 
