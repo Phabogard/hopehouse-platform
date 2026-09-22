@@ -23,6 +23,9 @@ export const permissions = [
   'catalogue:commission:manage',
   'catalogue:service:manage',
   'wallets:credit',
+  'wallets:recharge',
+  'wallets:reconcile',
+  'receipts:read',
 ] as const;
 
 export type Permission = (typeof permissions)[number];
@@ -71,20 +74,20 @@ export const rolePermissions: Record<Role, readonly Permission[]> = {
     'payments:read', 'invoices:read', 'audit:read',
     'catalogue:read', 'catalogue:manage', 'catalogue:activate', 'catalogue:archive',
     'catalogue:price:manage', 'catalogue:commission:manage', 'catalogue:service:manage',
-    'wallets:credit',
+    'wallets:credit', 'wallets:recharge', 'wallets:reconcile', 'receipts:read',
   ],
   business_admin: [
     'users:read', 'beneficiaries:read', 'beneficiaries:manage', 'services:read', 'services:manage',
     'subscriptions:read', 'subscriptions:manage', 'payments:read', 'payments:create', 'invoices:read',
     'catalogue:read', 'catalogue:manage', 'catalogue:activate', 'catalogue:archive',
-    'catalogue:price:manage', 'catalogue:commission:manage', 'catalogue:service:manage',
+    'catalogue:price:manage', 'catalogue:commission:manage', 'catalogue:service:manage', 'receipts:read',
   ],
   operations_agent: [
     'beneficiaries:read', 'beneficiaries:manage', 'services:read', 'subscriptions:read', 'subscriptions:manage',
     'payments:read', 'payments:create', 'invoices:read', 'catalogue:read',
   ],
-  finance_manager: ['beneficiaries:read', 'services:read', 'subscriptions:read', 'payments:read', 'payments:create', 'payments:validate', 'invoices:read', 'invoices:manage', 'accounting:export', 'wallets:credit'],
-  client: [],
-  accountant: ['payments:read', 'invoices:read', 'accounting:export'],
-  auditor: ['audit:read'],
+  finance_manager: ['beneficiaries:read', 'services:read', 'subscriptions:read', 'payments:read', 'payments:create', 'payments:validate', 'invoices:read', 'invoices:manage', 'accounting:export', 'wallets:credit', 'receipts:read'],
+  client: ['wallets:recharge', 'receipts:read'],
+  accountant: ['payments:read', 'invoices:read', 'accounting:export', 'receipts:read'],
+  auditor: ['audit:read', 'receipts:read'],
 };
