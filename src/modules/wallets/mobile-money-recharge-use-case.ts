@@ -28,6 +28,7 @@ export interface CreateRechargeCommand {
 
 export interface ConfirmRechargeCommand {
   readonly attemptId: string;
+  readonly walletId: string;
   readonly confirmedAmountCents: number;
   readonly confirmedCurrency: string;
   readonly externalReference?: string;
@@ -157,6 +158,9 @@ export class MobileMoneyRechargeUseCase {
 
       const attempt = await tx.mobileMoneyRechargeAttempt.findUnique({ where: { id: command.attemptId } });
       if (!attempt) throw new ValidationError('Tentative de recharge introuvable');
+      if (attempt.walletId !== command.walletId) {
+        throw new RechargeConflictError('Le wallet de la route ne correspond pas à la tentative');
+      }
 
       if (isFinal(attempt.status)) {
         const sameKey = await new PostgresIdempotencyStore(tx).find(
