@@ -133,6 +133,98 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /wallets/{walletId}/recharges:
+    post:
+      summary: Enregistre une tentative de recharge Mobile Money à rapprocher.
+      description: >-
+        Crée une tentative sans modifier le solde. Le statut initial est
+        reconciliation_pending. Le crédit financier reste exclusivement dans
+        le Wallet Engine après validation autorisée.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: walletId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+            minLength: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateMobileMoneyRechargeRequest'
+      responses:
+        '201':
+          description: Tentative créée.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MobileMoneyRechargeResponse'
+        '200':
+          description: Rejeu idempotent.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MobileMoneyRechargeResponse'
+  /wallets/{walletId}/recharges/{attemptId}/confirm:
+    post:
+      summary: Confirme un rapprochement Mobile Money et crédite le wallet.
+      description: >-
+        Réservé au rôle disposant de wallets:reconcile. La confirmation
+        compare montant et devise, verrouille la tentative, puis crédite
+        le Wallet dans la même transaction PostgreSQL que le statut, l'audit,
+        l'idempotence et l'outbox. Un écart produit MISMATCH sans crédit.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: walletId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: attemptId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+            minLength: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConfirmMobileMoneyRechargeRequest'
+      responses:
+        '201':
+          description: Confirmation et crédit effectués.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MobileMoneyRechargeResponse'
+        '200':
+          description: Rejeu idempotent ou résultat existant.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MobileMoneyRechargeResponse'
+        '409':
+          description: Tentative déjà créditée, état incompatible ou conflit de rapprochement.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /users:
     get:
       summary: Liste les utilisateurs.
@@ -1008,6 +1100,91 @@ components:
             - string
             - 'null'
 
+    CreateMobileMoneyRechargeRequest:
+      type: object
+      required:
+        - orderId
+        - amountCents
+        - currency
+        - network
+      properties:
+        orderId:
+          type: string
+        amountCents:
+          type: integer
+          minimum: 1
+        currency:
+          type: string
+          minLength: 3
+          maxLength: 3
+        network:
+          type: string
+          minLength: 1
+        externalReference:
+          type: string
+          minLength: 1
+        metadata:
+          type: object
+    ConfirmMobileMoneyRechargeRequest:
+      type: object
+      required:
+        - confirmedAmountCents
+        - confirmedCurrency
+      properties:
+        confirmedAmountCents:
+          type: integer
+          minimum: 1
+        confirmedCurrency:
+          type: string
+          minLength: 3
+          maxLength: 3
+        externalReference:
+          type: string
+          minLength: 1
+        reviewMetadata:
+          type: object
+    MobileMoneyRechargeResponse:
+      type: object
+      required:
+        - data
+      properties:
+        data:
+          type: object
+          required:
+            - id
+            - orderId
+            - walletId
+            - requestedAmountCents
+            - requestedCurrency
+            - network
+            - status
+          properties:
+            id:
+              type: string
+            orderId:
+              type: string
+            walletId:
+              type: string
+            requestedAmountCents:
+              type: integer
+            requestedCurrency:
+              type: string
+            network:
+              type: string
+            status:
+              type: string
+            externalReference:
+              type:
+                - string
+                - 'null'
+            confirmedAmountCents:
+              type:
+                - integer
+                - 'null'
+            confirmedCurrency:
+              type:
+                - string
+                - 'null'
     CreditWalletRequest:
       type: object
       required:
