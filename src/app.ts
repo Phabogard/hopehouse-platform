@@ -15,6 +15,7 @@ import { AuthRuntimeContext, type AuthenticatedActor, type AuthenticatedLoginRes
 import { OpenAiResponsesClient, resolveLiveAiPolicy, type AiChatProvider } from './modules/ai-assistant/openai.js';
 import { getHealthStatus } from './modules/health/health.js';
 import { serveStaticFile } from './infrastructure/http/static-files.js';
+import type { NotificationDeviceRegistry } from './modules/notifications/notification-device-registry.js';
 
 const orderEngine = new OrderEngine();
 const orders = new Map<string, Order>();
@@ -47,6 +48,7 @@ export interface HopeHouseServerOptions {
   readonly orderRepository?: OrderRepository;
   readonly orderEngine?: OrderEngine;
   readonly publicDir?: string;
+  readonly notificationDevices?: NotificationDeviceRegistry | null;
 }
 
 function sendJson(response: ServerResponse, statusCode: number, body: unknown): void {
@@ -202,6 +204,7 @@ export function createHopeHouseServer(options: HopeHouseServerOptions = {}) {
   const orderRepository = options.orderRepository;
   const orderEngine = options.orderEngine ?? new OrderEngine({}, orderRepository);
   const publicDir = options.publicDir ?? join(process.cwd(), 'public');
+  const notificationDevices = options.notificationDevices ?? null;
 
   return createServer(async (request: IncomingMessage, response: ServerResponse) => {
     const url = new URL(request.url ?? '/', 'http://localhost');
@@ -248,6 +251,70 @@ export function createHopeHouseServer(options: HopeHouseServerOptions = {}) {
       if (isProtectedRoute(request.method, url.pathname)) {
         actor = await authenticatedActor(auth, request);
         auditContext = sensitiveAuditContext(request.method, url.pathname, actor);
+      }
+
+      if (request.method === 'POST' && url.pathname === '/notification-devices') {
+        const currentActor = requireAuthenticatedActor(actor);
+        if (notificationDevices === null) throw new ValidationError('Registre des appareils de notification non configuré');
+        const body = await readJsonBody(request);
+        const device = await notificationDevices.register({
+          userId: currentActor.id,
+          provider: stringField(body, 'provider'),
+          platform: stringField(body, 'platform'),
+          installationId: stringField(body, 'installationId'),
+          registrationToken: stringField(body, 'registrationToken'),
+          metadata: optionalObjectField(body, 'metadata') ?? undefined,
+        });
+        sendJson(response, 201, {
+          data: {
+            id: device.id,
+            provider: device.provider,
+            platform: device.platform,
+            installationId: device.installationId,
+            status: device.status,
+            createdAt: device.createdAt,
+            updatedAt: device.updatedAt,
+            lastSeenAt: device.lastSeenAt,
+            revokedAt: device.revokedAt,
+            metadata: device.metadata,
+          },
+        });
+        return;
+      }
+
+      if (request.method === 'GET' && url.pathname === '/notification-devices') {
+        const currentActor = requireAuthenticatedActor(actor);
+        if (notificationDevices === null) throw new ValidationError('Registre des appareils de notification non configuré');
+        const provider = url.searchParams.get('provider') ?? undefined;
+        const devices = await notificationDevices.listActive({ userId: currentActor.id, provider });
+        sendJson(response, 200, {
+          data: devices.map((device) => ({
+            id: device.id,
+            provider: device.provider,
+            platform: device.platform,
+            installationId: device.installationId,
+            status: device.status,
+            createdAt: device.createdAt,
+            updatedAt: device.updatedAt,
+            lastSeenAt: device.lastSeenAt,
+            revokedAt: device.revokedAt,
+            metadata: device.metadata,
+          })),
+        });
+        return;
+      }
+
+      if (request.method === 'DELETE' && url.pathname.match(/^\/notification-devices\/[^/]+\/[^/]+$/) !== null) {
+        const currentActor = requireAuthenticatedActor(actor);
+        if (notificationDevices === null) throw new ValidationError('Registre des appareils de notification non configuré');
+        const [, , provider, installationId] = url.pathname.split('/');
+        const revoked = await notificationDevices.revoke({
+          userId: currentActor.id,
+          provider: decodeURIComponent(provider ?? ''),
+          installationId: decodeURIComponent(installationId ?? ''),
+        });
+        sendJson(response, 200, { data: { revoked } });
+        return;
       }
 
       if (request.method === 'POST' && url.pathname === '/ai/chat') {
