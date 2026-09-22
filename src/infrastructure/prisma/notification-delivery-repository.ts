@@ -35,7 +35,7 @@ export class PrismaNotificationDeliveryRepository implements NotificationDeliver
       INSERT INTO "notification_deliveries"
         ("id", "deduplication_key", "device_id", "provider", "status", "created_at", "updated_at")
       VALUES
-        (gen_random_uuid()::text, ${input.deduplicationKey}, ${input.deviceId}, ${input.provider}, 'sending', ${now}, ${now})
+        (${input.id}, ${input.deduplicationKey}, ${input.deviceId}, ${input.provider}, 'sending', ${now}, ${now})
       ON CONFLICT ("deduplication_key", "device_id") DO NOTHING
       RETURNING "id", "deduplication_key", "device_id", "provider", "status",
                 "provider_message_id", "last_error", "created_at", "updated_at"
