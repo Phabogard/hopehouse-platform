@@ -117,7 +117,7 @@ model User {
   revokedSessions         LoginSession[]        @relation("SessionRevokedBy")
   adminAccessLogsAsActor  AdminAccessLog[]      @relation("AdminAccessLogActor")
   adminAccessLogsAsTarget AdminAccessLog[]      @relation("AdminAccessLogTarget")
-  notificationDevices     NotificationDevice[];
+  notificationDevices     NotificationDevice[]
 
   @@index([status])
   @@index([roleId])
