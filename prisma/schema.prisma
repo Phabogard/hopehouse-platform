@@ -486,6 +486,7 @@ model Wallet {
   transactions WalletTransaction[]
   reservations WalletReservation[]
   rechargeAttempts MobileMoneyRechargeAttempt[]
+  receipts         WalletReceipt[]
 
   @@unique([ownerType, ownerId], name: "wallets_owner_type_owner_id_unique")
   @@index([ownerType, ownerId], name: "wallets_owner_lookup_idx")
@@ -582,6 +583,7 @@ model MobileMoneyRechargeAttempt {
 
   order  Order  @relation(fields: [orderId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   wallet Wallet @relation(fields: [walletId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  receipt WalletReceipt?
 
   @@index([orderId, createdAt], name: "mobile_money_recharge_attempts_order_created_at_idx")
   @@index([walletId, status, createdAt], name: "mobile_money_recharge_attempts_wallet_status_created_at_idx")
@@ -590,6 +592,26 @@ model MobileMoneyRechargeAttempt {
   @@map("mobile_money_recharge_attempts")
 }
 
+
+model WalletReceipt {
+  id                   String   @id @map("id")
+  rechargeAttemptId    String   @unique @map("recharge_attempt_id")
+  orderId              String   @map("order_id")
+  walletId             String   @map("wallet_id")
+  receiptNumber        String   @unique @map("receipt_number")
+  amountCents          BigInt   @map("amount_cents")
+  currency             String   @map("currency")
+  issuedAt             DateTime @db.Timestamptz(3) @map("issued_at")
+  metadataJson         Json     @map("metadata_json")
+
+  rechargeAttempt MobileMoneyRechargeAttempt @relation(fields: [rechargeAttemptId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  order           Order                     @relation(fields: [orderId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  wallet          Wallet                    @relation(fields: [walletId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([walletId, issuedAt], name: "wallet_receipts_wallet_issued_at_idx")
+  @@index([orderId, issuedAt], name: "wallet_receipts_order_issued_at_idx")
+  @@map("wallet_receipts")
+}
 // ==========================================
 // MODULE ORDERS & ORDER TRANSITIONS
 // ==========================================
@@ -634,6 +656,7 @@ model Order {
 
   transitions OrderTransition[]
   mobileMoneyRechargeAttempts MobileMoneyRechargeAttempt[]
+  walletReceipts               WalletReceipt[]
 
   @@index([currentStep], name: "orders_current_step_idx")
   @@index([serviceDefinitionId], name: "orders_service_definition_id_idx")
