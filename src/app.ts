@@ -148,7 +148,7 @@ function isProtectedRoute(method: string | undefined, pathname: string): boolean
   if (method === 'POST' && pathname.match(/^\/orders\/[^/]+\/transitions$/) !== null) return true;
   if (method === 'GET' && ['/users', '/beneficiaries', '/services', '/subscriptions', '/payments', '/invoices', '/audit-logs', '/notification-devices'].includes(pathname)) return true;
   if (method === 'POST' && ['/beneficiaries', '/payments', '/ai/chat', '/notification-devices'].includes(pathname)) return true;
-  if (method === 'DELETE' && pathname.match(/^\\/notification-devices\\/[^/]+\\/[^/]+$/) !== null) return true;
+    if (method === 'DELETE' && pathname.match(/^\/notification-devices\/[^/]+\/[^/]+$/) !== null) return true;
   return false;
 }
 
