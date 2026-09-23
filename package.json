@@ -5,7 +5,7 @@
   "description": "Hope House ERP platform MVP backend and design foundation.",
   "type": "module",
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "prisma generate && tsc -p tsconfig.json",
     "dev": "npm run build && node dist/src/server.js",
     "start": "node dist/src/server.js",
     "test": "npm run build && node tests/run-tests.js",
