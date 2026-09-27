@@ -73,3 +73,34 @@ test('rejects inactive catalogue items before pricing', async () => {
     (error: unknown) => error instanceof ValidationError && error.message.includes('item catalogue n’est pas actif'),
   );
 });
+
+test('rejects an item outside its validity window', async () => {
+  const expiredItem = { ...item, validUntil: new Date('2026-09-01T00:00:00Z') };
+  const repository: CatalogueOrderPricingRepository = {
+    ...fakeRepository(),
+    async findItemById() { return expiredItem; },
+  };
+  await assert.rejects(
+    () => resolveOrderPrice(repository, { serviceDefinitionId: service.id, catalogItemId: item.id, at: new Date('2026-09-27T10:00:00Z') }),
+    (error: unknown) => error instanceof ValidationError && error.message.includes('période de validité'),
+  );
+});
+
+test('rejects an inactive service before pricing', async () => {
+  const inactiveService = { ...service, status: 'inactive' as const };
+  const repository: CatalogueOrderPricingRepository = {
+    ...fakeRepository(),
+    async findServiceById() { return inactiveService; },
+  };
+  await assert.rejects(
+    () => resolveOrderPrice(repository, { serviceDefinitionId: service.id, catalogItemId: item.id }),
+    (error: unknown) => error instanceof ValidationError && error.message.includes('service catalogue n’est pas actif'),
+  );
+});
+
+test('rejects missing catalogue pricing', async () => {
+  await assert.rejects(
+    () => resolveOrderPrice(fakeRepository([]), { serviceDefinitionId: service.id, catalogItemId: item.id }),
+    (error: unknown) => error instanceof ValidationError && error.message.includes('Aucun prix catalogue'),
+  );
+});
