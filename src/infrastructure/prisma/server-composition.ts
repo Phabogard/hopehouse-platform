@@ -87,7 +87,8 @@ export async function createPrismaHopeHouseServer(options: PrismaHopeHouseServer
   const authRuntime = new PrismaAuthRuntimeContext(client, { ...authOptions, policy });
   const auditRepository = new PrismaAuditLogRepository(client);
   const audit = new AuditLogService(auditRepository);
-  const catalogue = new CatalogueService(new PrismaCatalogRepository(client));
+  const catalogueRepository = new PrismaCatalogRepository(client);
+  const catalogue = new CatalogueService(catalogueRepository);
   const idempotency = new PostgresIdempotencyStore(client);
   const notificationDevices = new NotificationDeviceRegistry(new PrismaNotificationDeviceRepository(client));
   const notificationDeliveries = new PrismaNotificationDeliveryRepository(client);
@@ -187,6 +188,7 @@ export async function createPrismaHopeHouseServer(options: PrismaHopeHouseServer
     prisma: client,
     idempotencyStore: idempotency,
     createIdempotencyStore: (tx: unknown) => new PostgresIdempotencyStore(tx as Prisma.TransactionClient),
+    pricingRepository: catalogueRepository,
   });
 
   const baseServer = createHopeHouseServer({ authRuntime, audit, orderRepository, orderEngine, notificationDevices });
