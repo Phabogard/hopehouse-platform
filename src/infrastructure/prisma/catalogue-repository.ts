@@ -8,8 +8,10 @@ import {
   type CreateCatalogInput,
   type CreateCatalogItemInput,
   type CreateServiceInput,
+  type PriceRule,
   type ServiceDefinition,
 } from '../../modules/catalogue/catalogue.js';
+import type { CatalogueOrderPricingRepository } from '../../modules/catalogue/catalogue-pricing.js';
 
 type JsonObject = Record<string, unknown>;
 
@@ -34,7 +36,11 @@ function toServiceDefinition(record: { id: string; code: string; name: string; t
   return Object.freeze({ id: record.id, code: record.code, name: record.name, type: record.type, networkId: record.networkId, providerId: record.providerId, status: record.status, metadata: Object.freeze(toJsonObject(record.metadata)), createdAt: record.createdAt, updatedAt: record.updatedAt });
 }
 
-export class PrismaCatalogRepository implements CatalogRepository {
+function toPriceRule(record: { id: string; serviceDefinitionId: string; catalogItemId: string | null; currency: PriceRule['currency']; amountCents: bigint; status: PriceRule['status']; startsAt: Date | null; endsAt: Date | null; metadata: unknown; createdAt: Date; updatedAt: Date }): PriceRule {
+  return Object.freeze({ id: record.id, serviceDefinitionId: record.serviceDefinitionId, catalogItemId: record.catalogItemId, currency: record.currency, amountCents: record.amountCents, status: record.status, startsAt: record.startsAt, endsAt: record.endsAt, metadata: Object.freeze(toJsonObject(record.metadata)), createdAt: record.createdAt, updatedAt: record.updatedAt });
+}
+
+export class PrismaCatalogRepository implements CatalogRepository, CatalogueOrderPricingRepository {
   constructor(private readonly client: PrismaClient) {}
 
   async findCatalogByCode(code: string): Promise<Catalog | null> {
@@ -45,6 +51,11 @@ export class PrismaCatalogRepository implements CatalogRepository {
   async findCatalogById(id: string): Promise<Catalog | null> {
     const record = await this.client.catalog.findUnique({ where: { id } });
     return record === null ? null : toCatalog(record);
+  }
+
+  async findItemById(id: string): Promise<CatalogItem | null> {
+    const record = await this.client.catalogItem.findUnique({ where: { id } });
+    return record === null ? null : toCatalogItem(record);
   }
 
   async findItemByCode(catalogId: string, code: string): Promise<CatalogItem | null> {
@@ -65,6 +76,22 @@ export class PrismaCatalogRepository implements CatalogRepository {
   async findServiceById(id: string): Promise<ServiceDefinition | null> {
     const record = await this.client.serviceDefinition.findUnique({ where: { id } });
     return record === null ? null : toServiceDefinition(record);
+  }
+
+  async findApplicablePriceRules(params: { serviceDefinitionId: string; catalogItemId: string; at: Date; currency?: string }): Promise<readonly PriceRule[]> {
+    const where = {
+      serviceDefinitionId: params.serviceDefinitionId,
+      status: 'active' as const,
+      ...(params.currency === undefined ? {} : { currency: params.currency as 'USD' | 'CDF' }),
+      startsAt: { lte: params.at },
+      OR: [{ endsAt: null }, { endsAt: { gt: params.at } }],
+    };
+
+    const itemRules = await this.client.priceRule.findMany({ where: { ...where, catalogItemId: params.catalogItemId }, orderBy: [{ startsAt: 'desc' }, { createdAt: 'desc' }] });
+    if (itemRules.length > 0) return Object.freeze(itemRules.map(toPriceRule));
+
+    const serviceRules = await this.client.priceRule.findMany({ where: { ...where, catalogItemId: null }, orderBy: [{ startsAt: 'desc' }, { createdAt: 'desc' }] });
+    return Object.freeze(serviceRules.map(toPriceRule));
   }
 
   async createCatalog(input: CreateCatalogInput): Promise<Catalog> {
