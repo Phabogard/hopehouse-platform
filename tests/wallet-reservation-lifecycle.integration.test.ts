@@ -335,3 +335,94 @@ test('wallet rollback: same idempotency key cannot replay against another target
     await client.$disconnect();
   }
 });
+
+
+test('wallet reservation lifecycle: release idempotency key replays only the same reservation operation', { skip: databaseUrl === undefined }, async () => {
+  const client = integrationClient();
+  const repo = new PrismaWalletRepository(client);
+
+  try {
+    const first = await setupReservation(repo);
+    const initial = await repo.releaseReservation({
+      reservationId: first.reservation.id,
+      transactionId: `tx-release-${randomUUID()}`,
+      walletId: first.wallet.id,
+      actorId: 'system',
+      transactionKey: 'release-replay-key',
+    });
+    const replay = await repo.releaseReservation({
+      reservationId: first.reservation.id,
+      transactionId: `tx-release-replay-${randomUUID()}`,
+      walletId: first.wallet.id,
+      actorId: 'system',
+      transactionKey: 'release-replay-key',
+    });
+
+    assert.equal(replay.transaction.id, initial.transaction.id);
+    assert.equal(replay.reservation.id, initial.reservation.id);
+    assert.equal(replay.reservation.status, 'RELEASED');
+
+    const releaseCount = await client.walletTransaction.count({
+      where: { walletId: first.wallet.id, transactionKey: 'release-replay-key' },
+    });
+    assert.equal(releaseCount, 1);
+
+    await assert.rejects(
+      () => repo.captureReservation({
+        reservationId: first.reservation.id,
+        transactionId: `tx-capture-${randomUUID()}`,
+        walletId: first.wallet.id,
+        actorId: 'system',
+        transactionKey: 'release-replay-key',
+      }),
+      /does not match the requested reservation capture/,
+    );
+  } finally {
+    await client.$disconnect();
+  }
+});
+
+test('wallet reservation lifecycle: capture idempotency key replays only the same reservation operation', { skip: databaseUrl === undefined }, async () => {
+  const client = integrationClient();
+  const repo = new PrismaWalletRepository(client);
+
+  try {
+    const first = await setupReservation(repo);
+    const initial = await repo.captureReservation({
+      reservationId: first.reservation.id,
+      transactionId: `tx-capture-${randomUUID()}`,
+      walletId: first.wallet.id,
+      actorId: 'system',
+      transactionKey: 'capture-replay-key',
+    });
+    const replay = await repo.captureReservation({
+      reservationId: first.reservation.id,
+      transactionId: `tx-capture-replay-${randomUUID()}`,
+      walletId: first.wallet.id,
+      actorId: 'system',
+      transactionKey: 'capture-replay-key',
+    });
+
+    assert.equal(replay.transaction.id, initial.transaction.id);
+    assert.equal(replay.reservation.id, initial.reservation.id);
+    assert.equal(replay.reservation.status, 'CAPTURED');
+
+    const captureCount = await client.walletTransaction.count({
+      where: { walletId: first.wallet.id, transactionKey: 'capture-replay-key' },
+    });
+    assert.equal(captureCount, 1);
+
+    await assert.rejects(
+      () => repo.releaseReservation({
+        reservationId: first.reservation.id,
+        transactionId: `tx-release-${randomUUID()}`,
+        walletId: first.wallet.id,
+        actorId: 'system',
+        transactionKey: 'capture-replay-key',
+      }),
+      /does not match the requested reservation release/,
+    );
+  } finally {
+    await client.$disconnect();
+  }
+});
