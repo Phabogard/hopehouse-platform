@@ -50,7 +50,7 @@ test('rejects a client amount that differs from the catalogue price', async () =
 test('rejects a client currency that differs from the catalogue price', async () => {
   await assert.rejects(
     () => resolveOrderPrice(fakeRepository(), { serviceDefinitionId: service.id, catalogItemId: item.id, requestedCurrency: 'USD' }),
-    (error: unknown) => error instanceof ValidationError && error.message.includes('Aucun prix catalogue'),
+    (error: unknown) => error instanceof ValidationError && error.message.includes('La devise demandée ne correspond pas au prix catalogue'),
   );
 });
 
