@@ -923,6 +923,8 @@ export class PrismaWalletRepository {
     tx: Prisma.TransactionClient,
     params: RollbackTransactionParams,
   ): Promise<WalletTransactionDto> {
+    await this.lockActiveWallet(tx, params.walletId);
+
     if (params.transactionKey) {
       const existingTx = await tx.walletTransaction.findFirst({
         where: { walletId: params.walletId, transactionKey: params.transactionKey },
@@ -932,10 +934,19 @@ export class PrismaWalletRepository {
       }
     }
 
+    const lockedTarget = await tx.$queryRaw<Array<{ id: string }>>`
+      SELECT id
+      FROM wallet_transactions
+      WHERE id = ${params.targetTransactionId}
+      FOR UPDATE
+    `;
+    if (!lockedTarget[0]) {
+      throw new WalletNotFoundError(`Target transaction not found: ${params.targetTransactionId}`);
+    }
+
     const targetTx = await tx.walletTransaction.findUnique({
       where: { id: params.targetTransactionId },
     });
-
     if (!targetTx) {
       throw new WalletNotFoundError(`Target transaction not found: ${params.targetTransactionId}`);
     }
@@ -959,50 +970,107 @@ export class PrismaWalletRepository {
       throw new WalletConflictError(`Transaction ${targetTx.id} has already been reversed by ${existingReversal.id}`);
     }
 
-    if (targetTx.type === WalletTransactionType.CREDIT) {
-      const lockedBalance = await tx.$queryRaw<Array<{
-        wallet_id: string;
-        currency: string;
-        available_cents: bigint;
-        reserved_cents: bigint;
-      }>>`
-        SELECT wallet_id, currency, available_cents, reserved_cents
-        FROM wallet_balances
-        WHERE wallet_id = ${params.walletId} AND currency = ${targetTx.currency}
-        FOR UPDATE
-      `;
+    if (targetTx.type === WalletTransactionType.RELEASE) {
+      throw new WalletConflictError(`Cannot automatically rollback a reservation release: ${targetTx.id}`);
+    }
 
-      const balance = lockedBalance[0];
-      if (!balance || balance.available_cents < targetTx.amountCents) {
-        throw new ValidationError(`Insufficient available balance to rollback credit: requires ${fromSafeBigIntCents(targetTx.amountCents)}`);
-      }
-      await tx.walletBalance.update({
-        where: { walletId_currency: { walletId: params.walletId, currency: targetTx.currency } },
-        data: { availableCents: { decrement: targetTx.amountCents } },
-      });
-    } else if (targetTx.type === WalletTransactionType.DEBIT) {
-      await tx.walletBalance.update({
-        where: { walletId_currency: { walletId: params.walletId, currency: targetTx.currency } },
-        data: { availableCents: { increment: targetTx.amountCents } },
-      });
-    } else if (targetTx.type === WalletTransactionType.RESERVATION_HOLD) {
+    if (targetTx.type === WalletTransactionType.RESERVATION_HOLD) {
       const res = await tx.walletReservation.findFirst({
         where: { walletId: params.walletId, createdByTransactionId: targetTx.id },
       });
-      if (res && res.status === WalletReservationStatus.ACTIVE) {
-        await tx.walletBalance.update({
-          where: { walletId_currency: { walletId: params.walletId, currency: res.currency } },
-          data: {
-            reservedCents: { decrement: res.amountCents },
-            availableCents: { increment: res.amountCents },
-          },
-        });
-        await tx.walletReservation.update({
-          where: { id: res.id },
-          data: { status: WalletReservationStatus.ROLLED_BACK },
-        });
+      if (!res) {
+        throw new WalletNotFoundError(`Reservation not found for hold transaction: ${targetTx.id}`);
+      }
+
+      const lockedReservation = await this.lockReservation(tx, res.id);
+      if (lockedReservation.status !== WalletReservationStatus.ACTIVE) {
+        throw new WalletConflictError(`Reservation cannot be rolled back in current status: ${lockedReservation.status}`);
+      }
+
+      await tx.walletBalance.update({
+        where: {
+          walletId_currency: { walletId: params.walletId, currency: lockedReservation.currency },
+        },
+        data: {
+          reservedCents: { decrement: lockedReservation.amountCents },
+          availableCents: { increment: lockedReservation.amountCents },
+        },
+      });
+
+      const rollbackTx = await tx.walletTransaction.create({
+        data: {
+          id: params.rollbackTransactionId,
+          walletId: params.walletId,
+          currency: targetTx.currency,
+          amountCents: targetTx.amountCents,
+          type: WalletTransactionType.ROLLBACK,
+          status: WalletTransactionStatus.SETTLED,
+          actorId: params.actorId,
+          transactionKey: params.transactionKey ?? null,
+          reversalOfTransactionId: targetTx.id,
+          metadataJson: (params.metadata ?? {}) as Prisma.InputJsonValue,
+        },
+      });
+
+      const updatedReservation = await tx.walletReservation.update({
+        where: { id: lockedReservation.id },
+        data: {
+          status: WalletReservationStatus.ROLLED_BACK,
+          closedByTransactionId: rollbackTx.id,
+        },
+      });
+
+      return this.mapTransaction(rollbackTx);
+    }
+
+    let reservationToUpdate: Awaited<ReturnType<typeof this.lockReservation>> | null = null;
+
+    if (targetTx.type === WalletTransactionType.CAPTURE) {
+      const res = await tx.walletReservation.findFirst({
+        where: { walletId: params.walletId, createdByTransactionId: targetTx.id },
+      });
+      if (!res) {
+        throw new WalletNotFoundError(`Reservation not found for capture transaction: ${targetTx.id}`);
+      }
+      reservationToUpdate = await this.lockReservation(tx, res.id);
+      if (reservationToUpdate.status !== WalletReservationStatus.CAPTURED) {
+        throw new WalletConflictError(`Captured reservation cannot be rolled back in current status: ${reservationToUpdate.status}`);
       }
     }
+
+    const lockedBalance = await tx.$queryRaw<Array<{
+      wallet_id: string;
+      currency: string;
+      available_cents: bigint;
+      reserved_cents: bigint;
+    }>>`
+      SELECT wallet_id, currency, available_cents, reserved_cents
+      FROM wallet_balances
+      WHERE wallet_id = ${params.walletId} AND currency = ${targetTx.currency}
+      FOR UPDATE
+    `;
+
+    const balance = lockedBalance[0];
+    if (!balance) {
+      throw new WalletNotFoundError(`Wallet balance not found for ${params.walletId} / ${targetTx.currency}`);
+    }
+
+    if (targetTx.type === WalletTransactionType.CREDIT && balance.available_cents < targetTx.amountCents) {
+      throw new ValidationError(`Insufficient available balance to rollback credit: requires ${fromSafeBigIntCents(targetTx.amountCents)}`);
+    }
+
+    if (targetTx.type !== WalletTransactionType.CREDIT && targetTx.type !== WalletTransactionType.DEBIT && targetTx.type !== WalletTransactionType.CAPTURE) {
+      throw new WalletConflictError(`Transaction type cannot be rolled back automatically: ${targetTx.type}`);
+    }
+
+    await tx.walletBalance.update({
+      where: { walletId_currency: { walletId: params.walletId, currency: targetTx.currency } },
+      data: {
+        availableCents: targetTx.type === WalletTransactionType.CREDIT
+          ? { decrement: targetTx.amountCents }
+          : { increment: targetTx.amountCents },
+      },
+    });
 
     const rollbackTx = await tx.walletTransaction.create({
       data: {
@@ -1018,6 +1086,16 @@ export class PrismaWalletRepository {
         metadataJson: (params.metadata ?? {}) as Prisma.InputJsonValue,
       },
     });
+
+    if (reservationToUpdate) {
+      await tx.walletReservation.update({
+        where: { id: reservationToUpdate.id },
+        data: {
+          status: WalletReservationStatus.ROLLED_BACK,
+          closedByTransactionId: rollbackTx.id,
+        },
+      });
+    }
 
     return this.mapTransaction(rollbackTx);
   }
