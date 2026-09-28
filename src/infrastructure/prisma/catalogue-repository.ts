@@ -91,11 +91,14 @@ export class PrismaCatalogRepository implements CatalogRepository, CatalogueOrde
       ],
     };
 
-    const itemRules = await this.client.priceRule.findMany({ where: { ...where, catalogItemId: params.catalogItemId }, orderBy: [{ startsAt: 'desc' }, { createdAt: 'desc' }] });
-    if (itemRules.length > 0) return Object.freeze(itemRules.map(toPriceRule));
-
-    const serviceRules = await this.client.priceRule.findMany({ where: { ...where, catalogItemId: null }, orderBy: [{ startsAt: 'desc' }, { createdAt: 'desc' }] });
-    return Object.freeze(serviceRules.map(toPriceRule));
+    const rules = await this.client.priceRule.findMany({
+      where: {
+        ...where,
+        OR: [{ catalogItemId: params.catalogItemId }, { catalogItemId: null }],
+      },
+      orderBy: [{ startsAt: 'desc' }, { createdAt: 'desc' }],
+    });
+    return Object.freeze(rules.map(toPriceRule));
   }
 
   async createCatalog(input: CreateCatalogInput): Promise<Catalog> {
