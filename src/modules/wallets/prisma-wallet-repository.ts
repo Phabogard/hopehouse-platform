@@ -1012,7 +1012,7 @@ export class PrismaWalletRepository {
         },
       });
 
-      const updatedReservation = await tx.walletReservation.update({
+      await tx.walletReservation.update({
         where: { id: lockedReservation.id },
         data: {
           status: WalletReservationStatus.ROLLED_BACK,
