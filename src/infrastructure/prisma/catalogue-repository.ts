@@ -13,6 +13,8 @@ import {
 } from '../../modules/catalogue/catalogue.js';
 import type { CatalogueOrderPricingRepository } from '../../modules/catalogue/catalogue-pricing.js';
 
+type PrismaCatalogueClient = PrismaClient | Prisma.TransactionClient;
+
 type JsonObject = Record<string, unknown>;
 
 function toJsonObject(value: unknown): JsonObject {
@@ -41,7 +43,7 @@ function toPriceRule(record: { id: string; serviceDefinitionId: string; catalogI
 }
 
 export class PrismaCatalogRepository implements CatalogRepository, CatalogueOrderPricingRepository {
-  constructor(private readonly client: PrismaClient) {}
+  constructor(private readonly client: PrismaCatalogueClient) {}
 
   async findCatalogByCode(code: string): Promise<Catalog | null> {
     const record = await this.client.catalog.findUnique({ where: { code: assertValidCode(code) } });
