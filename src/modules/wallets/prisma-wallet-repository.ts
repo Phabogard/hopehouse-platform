@@ -707,7 +707,7 @@ export class PrismaWalletRepository {
         const reservation = await this.prisma.walletReservation.findUnique({ where: { id: params.reservationId } });
         if (!reservation || reservation.walletId !== params.walletId) throw new WalletConflictError(`Transaction key ${params.transactionKey} does not match the requested reservation release`);
         const mapped = this.mapTransaction(existingTx);
-        this.assertIdempotentTransaction(mapped, { type: WalletTransactionType.RESERVATION_RELEASE, amountCents: reservation.amountCents, currency: reservation.currency }, params.transactionKey);
+        this.assertIdempotentTransaction(mapped, { type: WalletTransactionType.RESERVATION_RELEASE, amountCents: fromSafeBigIntCents(reservation.amountCents), currency: reservation.currency }, params.transactionKey);
         if (reservation.closedByTransactionId !== existingTx.id) throw new WalletConflictError(`Transaction key ${params.transactionKey} does not match the requested reservation release`);
         return { transaction: mapped, reservation: this.mapReservation(reservation) };
       }
@@ -727,7 +727,7 @@ export class PrismaWalletRepository {
           if (reservation) {
             if (reservation.walletId !== params.walletId) throw new WalletConflictError(`Transaction key ${params.transactionKey} does not match the requested reservation release wallet`);
             const mapped = this.mapTransaction(winnerTx);
-            this.assertIdempotentTransaction(mapped, { type: WalletTransactionType.RESERVATION_RELEASE, amountCents: reservation.amountCents, currency: reservation.currency }, params.transactionKey);
+            this.assertIdempotentTransaction(mapped, { type: WalletTransactionType.RESERVATION_RELEASE, amountCents: fromSafeBigIntCents(reservation.amountCents), currency: reservation.currency }, params.transactionKey);
             if (reservation.closedByTransactionId !== winnerTx.id) throw new WalletConflictError(`Transaction key ${params.transactionKey} does not match the requested reservation release`);
             return { transaction: mapped, reservation: this.mapReservation(reservation) };
           }
@@ -749,7 +749,7 @@ export class PrismaWalletRepository {
         const reservation = await tx.walletReservation.findUnique({ where: { id: params.reservationId } });
         if (!reservation || reservation.walletId !== params.walletId) throw new WalletConflictError(`Transaction key ${params.transactionKey} does not match the requested reservation release`);
         const mapped = this.mapTransaction(existingTx);
-        this.assertIdempotentTransaction(mapped, { type: WalletTransactionType.RESERVATION_RELEASE, amountCents: reservation.amountCents, currency: reservation.currency }, params.transactionKey);
+        this.assertIdempotentTransaction(mapped, { type: WalletTransactionType.RESERVATION_RELEASE, amountCents: fromSafeBigIntCents(reservation.amountCents), currency: reservation.currency }, params.transactionKey);
         if (reservation.closedByTransactionId !== existingTx.id) throw new WalletConflictError(`Transaction key ${params.transactionKey} does not match the requested reservation release`);
         return { transaction: mapped, reservation: this.mapReservation(reservation) };
       }
@@ -784,7 +784,7 @@ export class PrismaWalletRepository {
         id: params.transactionId,
         walletId: params.walletId,
         currency: reservation.currency,
-        amountCents: reservation.amountCents,
+        amountCents: fromSafeBigIntCents(reservation.amountCents),
         type: WalletTransactionType.RESERVATION_RELEASE,
         status: WalletTransactionStatus.SETTLED,
         actorId: params.actorId,
@@ -823,7 +823,7 @@ export class PrismaWalletRepository {
         const reservation = await this.prisma.walletReservation.findUnique({ where: { id: params.reservationId } });
         if (!reservation || reservation.walletId !== params.walletId) throw new WalletConflictError(`Transaction key ${params.transactionKey} does not match the requested reservation capture`);
         const mapped = this.mapTransaction(existingTx);
-        this.assertIdempotentTransaction(mapped, { type: WalletTransactionType.RESERVATION_CAPTURE, amountCents: reservation.amountCents, currency: reservation.currency }, params.transactionKey);
+        this.assertIdempotentTransaction(mapped, { type: WalletTransactionType.RESERVATION_CAPTURE, amountCents: fromSafeBigIntCents(reservation.amountCents), currency: reservation.currency }, params.transactionKey);
         if (reservation.closedByTransactionId !== existingTx.id) throw new WalletConflictError(`Transaction key ${params.transactionKey} does not match the requested reservation capture`);
         return { transaction: mapped, reservation: this.mapReservation(reservation) };
       }
@@ -843,7 +843,7 @@ export class PrismaWalletRepository {
           if (reservation) {
             if (reservation.walletId !== params.walletId) throw new WalletConflictError(`Transaction key ${params.transactionKey} does not match the requested reservation capture wallet`);
             const mapped = this.mapTransaction(winnerTx);
-            this.assertIdempotentTransaction(mapped, { type: WalletTransactionType.RESERVATION_CAPTURE, amountCents: reservation.amountCents, currency: reservation.currency }, params.transactionKey);
+            this.assertIdempotentTransaction(mapped, { type: WalletTransactionType.RESERVATION_CAPTURE, amountCents: fromSafeBigIntCents(reservation.amountCents), currency: reservation.currency }, params.transactionKey);
             if (reservation.closedByTransactionId !== winnerTx.id) throw new WalletConflictError(`Transaction key ${params.transactionKey} does not match the requested reservation capture`);
             return { transaction: mapped, reservation: this.mapReservation(reservation) };
           }
@@ -865,7 +865,7 @@ export class PrismaWalletRepository {
         const reservation = await tx.walletReservation.findUnique({ where: { id: params.reservationId } });
         if (!reservation || reservation.walletId !== params.walletId) throw new WalletConflictError(`Transaction key ${params.transactionKey} does not match the requested reservation capture`);
         const mapped = this.mapTransaction(existingTx);
-        this.assertIdempotentTransaction(mapped, { type: WalletTransactionType.RESERVATION_CAPTURE, amountCents: reservation.amountCents, currency: reservation.currency }, params.transactionKey);
+        this.assertIdempotentTransaction(mapped, { type: WalletTransactionType.RESERVATION_CAPTURE, amountCents: fromSafeBigIntCents(reservation.amountCents), currency: reservation.currency }, params.transactionKey);
         if (reservation.closedByTransactionId !== existingTx.id) throw new WalletConflictError(`Transaction key ${params.transactionKey} does not match the requested reservation capture`);
         return { transaction: mapped, reservation: this.mapReservation(reservation) };
       }
@@ -899,7 +899,7 @@ export class PrismaWalletRepository {
         id: params.transactionId,
         walletId: params.walletId,
         currency: reservation.currency,
-        amountCents: reservation.amountCents,
+        amountCents: fromSafeBigIntCents(reservation.amountCents),
         type: WalletTransactionType.RESERVATION_CAPTURE,
         status: WalletTransactionStatus.SETTLED,
         actorId: params.actorId,
@@ -953,13 +953,13 @@ export class PrismaWalletRepository {
           where: { walletId: params.walletId, transactionKey: params.transactionKey },
         });
         if (winnerTx) {
-          const mapped = this.mapTransaction(winnerTx);
-          this.assertIdempotentTransaction(mapped, {
-            type: WalletTransactionType.DEBIT,
-            amountCents: params.amountCents,
-            currency: validateCurrency(params.currency),
-          }, params.transactionKey);
-          return mapped;
+          if (
+            winnerTx.type !== WalletTransactionType.ROLLBACK ||
+            winnerTx.reversalOfTransactionId !== params.targetTransactionId
+          ) {
+            throw new WalletConflictError(`Transaction key ${params.transactionKey} does not match the requested rollback target`);
+          }
+          return this.mapTransaction(winnerTx);
         }
       }
       throw err;
@@ -1023,7 +1023,7 @@ export class PrismaWalletRepository {
       throw new WalletConflictError(`Transaction ${targetTx.id} has already been reversed by ${existingReversal.id}`);
     }
 
-    if (targetTx.type === WalletTransactionType.RELEASE) {
+    if (targetTx.type === WalletTransactionType.RESERVATION_RELEASE) {
       throw new WalletConflictError(`Cannot automatically rollback a reservation release: ${targetTx.id}`);
     }
 
@@ -1078,7 +1078,7 @@ export class PrismaWalletRepository {
 
     let reservationToUpdate: Awaited<ReturnType<typeof this.lockReservation>> | null = null;
 
-    if (targetTx.type === WalletTransactionType.CAPTURE) {
+    if (targetTx.type === WalletTransactionType.RESERVATION_CAPTURE) {
       const res = await tx.walletReservation.findFirst({
         where: { walletId: params.walletId, createdByTransactionId: targetTx.id },
       });
@@ -1112,7 +1112,7 @@ export class PrismaWalletRepository {
       throw new ValidationError(`Insufficient available balance to rollback credit: requires ${fromSafeBigIntCents(targetTx.amountCents)}`);
     }
 
-    if (targetTx.type !== WalletTransactionType.CREDIT && targetTx.type !== WalletTransactionType.DEBIT && targetTx.type !== WalletTransactionType.CAPTURE) {
+    if (targetTx.type !== WalletTransactionType.CREDIT && targetTx.type !== WalletTransactionType.DEBIT && targetTx.type !== WalletTransactionType.RESERVATION_CAPTURE) {
       throw new WalletConflictError(`Transaction type cannot be rolled back automatically: ${targetTx.type}`);
     }
 
