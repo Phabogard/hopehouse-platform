@@ -571,6 +571,65 @@ export class PrismaWalletRepository {
     };
   }
 
+  private async lockReservation(
+    tx: Prisma.TransactionClient,
+    reservationId: string,
+  ): Promise<{
+    id: string;
+    walletId: string;
+    currency: string;
+    amountCents: bigint;
+    status: WalletReservationStatus;
+    relatedEntityType: string | null;
+    relatedEntityId: string | null;
+    createdByTransactionId: string;
+    closedByTransactionId: string | null;
+    createdAt: Date;
+    updatedAt: Date;
+    metadataJson: Prisma.JsonValue;
+  }> {
+    const rows = await tx.$queryRaw<Array<{
+      id: string;
+      wallet_id: string;
+      currency: string;
+      amount_cents: bigint;
+      status: WalletReservationStatus;
+      related_entity_type: string | null;
+      related_entity_id: string | null;
+      created_by_transaction_id: string;
+      closed_by_transaction_id: string | null;
+      created_at: Date;
+      updated_at: Date;
+      metadata_json: Prisma.JsonValue;
+    }>>`
+      SELECT id, wallet_id, currency, amount_cents, status, related_entity_type, related_entity_id,
+             created_by_transaction_id, closed_by_transaction_id, created_at, updated_at, metadata_json
+      FROM wallet_reservations
+      WHERE id = ${reservationId}
+      FOR UPDATE
+    `;
+
+    const reservation = rows[0];
+    if (!reservation) {
+      throw new WalletNotFoundError(`Reservation not found: ${reservationId}`);
+    }
+
+    return {
+      id: reservation.id,
+      walletId: reservation.wallet_id,
+      currency: reservation.currency,
+      amountCents: reservation.amount_cents,
+      status: reservation.status,
+      relatedEntityType: reservation.related_entity_type,
+      relatedEntityId: reservation.related_entity_id,
+      createdByTransactionId: reservation.created_by_transaction_id,
+      closedByTransactionId: reservation.closed_by_transaction_id,
+      createdAt: reservation.created_at,
+      updatedAt: reservation.updated_at,
+      metadataJson: reservation.metadata_json,
+    };
+  }
+
   async releaseReservation(
     params: ReleaseReservationParams,
     externalTx?: Prisma.TransactionClient
@@ -588,6 +647,13 @@ export class PrismaWalletRepository {
           where: { id: params.reservationId },
         });
         if (reservation) {
+          if (
+            existingTx.type !== WalletTransactionType.RESERVATION_RELEASE ||
+            reservation.walletId !== params.walletId ||
+            reservation.closedByTransactionId !== existingTx.id
+          ) {
+            throw new WalletConflictError(`Transaction key ${params.transactionKey} does not match the requested reservation release`);
+          }
           return {
             transaction: this.mapTransaction(existingTx),
             reservation: this.mapReservation(reservation),
@@ -640,9 +706,7 @@ export class PrismaWalletRepository {
       }
     }
 
-    const reservation = await tx.walletReservation.findUnique({
-      where: { id: params.reservationId },
-    });
+    const reservation = await this.lockReservation(tx, params.reservationId);
 
     if (!reservation) {
       throw new WalletNotFoundError(`Reservation not found: ${params.reservationId}`);
@@ -711,6 +775,13 @@ export class PrismaWalletRepository {
           where: { id: params.reservationId },
         });
         if (reservation) {
+          if (
+            existingTx.type !== WalletTransactionType.RESERVATION_CAPTURE ||
+            reservation.walletId !== params.walletId ||
+            reservation.closedByTransactionId !== existingTx.id
+          ) {
+            throw new WalletConflictError(`Transaction key ${params.transactionKey} does not match the requested reservation capture`);
+          }
           return {
             transaction: this.mapTransaction(existingTx),
             reservation: this.mapReservation(reservation),
@@ -763,9 +834,7 @@ export class PrismaWalletRepository {
       }
     }
 
-    const reservation = await tx.walletReservation.findUnique({
-      where: { id: params.reservationId },
-    });
+    const reservation = await this.lockReservation(tx, params.reservationId);
 
     if (!reservation) {
       throw new WalletNotFoundError(`Reservation not found: ${params.reservationId}`);
