@@ -29,6 +29,31 @@ function createMockPrismaClient() {
       if (!wallet) return [];
       return [{ id: wallet.id, status: wallet.status }];
     }
+    if (query.includes('wallet_reservations') && query.includes('FOR UPDATE')) {
+      const reservationId = values[0];
+      const reservation = reservations.get(reservationId);
+      if (!reservation) return [];
+      return [{
+        id: reservation.id,
+        wallet_id: reservation.walletId,
+        currency: reservation.currency,
+        amount_cents: reservation.amountCents,
+        status: reservation.status,
+        related_entity_type: reservation.relatedEntityType ?? null,
+        related_entity_id: reservation.relatedEntityId ?? null,
+        created_by_transaction_id: reservation.createdByTransactionId,
+        closed_by_transaction_id: reservation.closedByTransactionId ?? null,
+        created_at: reservation.createdAt,
+        updated_at: reservation.updatedAt,
+        metadata_json: reservation.metadataJson,
+      }];
+    }
+    if (query.includes('wallet_transactions') && query.includes('FOR UPDATE')) {
+      const transactionId = values[0];
+      const transaction = transactions.get(transactionId);
+      if (!transaction) return [];
+      return [{ id: transaction.id }];
+    }
     if (query.includes('wallet_balances') && query.includes('FOR UPDATE')) {
       const walletId = values[0];
       const currency = values[1];
