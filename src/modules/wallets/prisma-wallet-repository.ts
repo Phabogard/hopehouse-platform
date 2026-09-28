@@ -390,7 +390,7 @@ export class PrismaWalletRepository {
         if (winnerTx) {
           const mapped = this.mapTransaction(winnerTx);
           this.assertIdempotentTransaction(mapped, {
-            type: WalletTransactionType.CREDIT,
+            type: WalletTransactionType.DEBIT,
             amountCents: params.amountCents,
             currency: validateCurrency(params.currency),
           }, params.transactionKey);
