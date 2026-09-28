@@ -117,3 +117,160 @@ test('wallet reservation lifecycle: same idempotency key cannot replay against a
     await client.$disconnect();
   }
 });
+
+
+test('wallet rollback: concurrent rollback attempts on the same target serialize and reverse exactly once', { skip: databaseUrl === undefined }, async () => {
+  const client = integrationClient();
+  const repo = new PrismaWalletRepository(client);
+
+  try {
+    const wallet = await repo.createWallet({
+      id: `w-${randomUUID()}`,
+      ownerType: 'USER',
+      ownerId: `u-${randomUUID()}`,
+    });
+
+    await repo.credit({
+      transactionId: `tx-credit-${randomUUID()}`,
+      walletId: wallet.id,
+      currency: 'EUR',
+      amountCents: 10_000,
+      actorId: 'system',
+    });
+
+    const debit = await repo.debit({
+      transactionId: `tx-debit-${randomUUID()}`,
+      walletId: wallet.id,
+      currency: 'EUR',
+      amountCents: 3_000,
+      actorId: 'system',
+    });
+
+    const results = await Promise.allSettled([
+      repo.rollbackTransaction({
+        rollbackTransactionId: `tx-rb-${randomUUID()}`,
+        targetTransactionId: debit.id,
+        walletId: wallet.id,
+        actorId: 'system',
+      }),
+      repo.rollbackTransaction({
+        rollbackTransactionId: `tx-rb-${randomUUID()}`,
+        targetTransactionId: debit.id,
+        walletId: wallet.id,
+        actorId: 'system',
+      }),
+    ]);
+
+    assert.equal(results.filter((r) => r.status === 'fulfilled').length, 1);
+    assert.equal(results.filter((r) => r.status === 'rejected').length, 1);
+
+    const state = await repo.getWalletById(wallet.id);
+    assert.equal(state?.balances[0]?.availableCents, 10_000);
+
+    const rollbackCount = await client.walletTransaction.count({
+      where: { walletId: wallet.id, type: 'ROLLBACK', reversalOfTransactionId: debit.id },
+    });
+    assert.equal(rollbackCount, 1);
+  } finally {
+    await client.$disconnect();
+  }
+});
+
+test('wallet rollback: captured reservation restores available balance and closes reservation as rolled back', { skip: databaseUrl === undefined }, async () => {
+  const client = integrationClient();
+  const repo = new PrismaWalletRepository(client);
+
+  try {
+    const { wallet, reservation } = await setupReservation(repo);
+
+    await repo.captureReservation({
+      reservationId: reservation.id,
+      transactionId: `tx-capture-${randomUUID()}`,
+      walletId: wallet.id,
+      actorId: 'system',
+      transactionKey: `capture-${randomUUID()}`,
+    });
+
+    const beforeRollback = await repo.getWalletById(wallet.id);
+    assert.equal(beforeRollback?.balances[0]?.availableCents, 6_000);
+    assert.equal(beforeRollback?.balances[0]?.reservedCents, 0);
+
+    const capture = await client.walletTransaction.findFirstOrThrow({
+      where: { walletId: wallet.id, type: 'RESERVATION_CAPTURE' },
+    });
+
+    const rollback = await repo.rollbackTransaction({
+      rollbackTransactionId: `tx-rb-${randomUUID()}`,
+      targetTransactionId: capture.id,
+      walletId: wallet.id,
+      actorId: 'system',
+    });
+    assert.equal(rollback.type, 'ROLLBACK');
+
+    const state = await repo.getWalletById(wallet.id);
+    assert.equal(state?.balances[0]?.availableCents, 10_000);
+    assert.equal(state?.balances[0]?.reservedCents, 0);
+
+    const persistedReservation = await client.walletReservation.findUnique({
+      where: { id: reservation.id },
+    });
+    assert.equal(persistedReservation?.status, 'ROLLED_BACK');
+    assert.equal(persistedReservation?.closedByTransactionId, rollback.id);
+  } finally {
+    await client.$disconnect();
+  }
+});
+
+test('wallet rollback: frozen wallet is rejected before any balance mutation', { skip: databaseUrl === undefined }, async () => {
+  const client = integrationClient();
+  const repo = new PrismaWalletRepository(client);
+
+  try {
+    const wallet = await repo.createWallet({
+      id: `w-${randomUUID()}`,
+      ownerType: 'USER',
+      ownerId: `u-${randomUUID()}`,
+    });
+
+    await repo.credit({
+      transactionId: `tx-credit-${randomUUID()}`,
+      walletId: wallet.id,
+      currency: 'EUR',
+      amountCents: 5_000,
+      actorId: 'system',
+    });
+
+    const debit = await repo.debit({
+      transactionId: `tx-debit-${randomUUID()}`,
+      walletId: wallet.id,
+      currency: 'EUR',
+      amountCents: 1_000,
+      actorId: 'system',
+    });
+
+    await client.wallet.update({
+      where: { id: wallet.id },
+      data: { status: 'FROZEN' },
+    });
+
+    await assert.rejects(
+      () => repo.rollbackTransaction({
+        rollbackTransactionId: `tx-rb-${randomUUID()}`,
+        targetTransactionId: debit.id,
+        walletId: wallet.id,
+        actorId: 'system',
+      }),
+      /Wallet is not active/,
+    );
+
+    const state = await repo.getWalletById(wallet.id);
+    assert.equal(state?.balances[0]?.availableCents, 4_000);
+
+    const rollbackCount = await client.walletTransaction.count({
+      where: { walletId: wallet.id, type: 'ROLLBACK', reversalOfTransactionId: debit.id },
+    });
+    assert.equal(rollbackCount, 0);
+  } finally {
+    await client.$disconnect();
+  }
+});
