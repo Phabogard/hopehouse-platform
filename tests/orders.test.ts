@@ -191,6 +191,16 @@ test('OrderEngine freezes the catalogue pricing snapshot at every metadata depth
   assert.equal(Object.isFrozen(pricing), true);
   assert.throws(() => { pricing.amountCents = 1; }, TypeError);
   assert.equal((order.metadata.pricing as Record<string, unknown>).amountCents, 500000);
+
+  const callerMetadata = { nested: { amountCents: 123 } };
+  const callerOrder = createOrder({
+    requesterActorId: 'actor-metadata',
+    serviceDefinitionId: service.id,
+    mode: 'manual',
+    metadata: callerMetadata,
+  });
+  assert.equal((callerOrder.metadata.nested as Record<string, unknown>).amountCents, 123);
+  assert.equal(Object.isFrozen(callerMetadata.nested), false);
 });
 
 test('OrderEngine runs generic handlers in sequence without embedding service-specific business logic', async () => {
