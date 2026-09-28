@@ -488,6 +488,39 @@ test('4. OPTION B: Cross-wallet rollback rejected by composite foreign key (SQLS
   );
 });
 
+test('wallet debit: frozen wallet is rejected before balance mutation', async () => {
+  const prisma = createMockPrismaClient();
+  const repo = new PrismaWalletRepository(prisma);
+
+  await repo.createWallet({ id: 'w-debit-frozen', ownerType: 'USER', ownerId: 'u-debit-frozen' });
+  await repo.credit({
+    transactionId: 'tx-debit-frozen-credit',
+    walletId: 'w-debit-frozen',
+    currency: 'EUR',
+    amountCents: 5000,
+    actorId: 'system',
+  });
+
+  await prisma.wallet.update({
+    where: { id: 'w-debit-frozen' },
+    data: { status: 'FROZEN' },
+  });
+
+  await assert.rejects(
+    () => repo.debit({
+      transactionId: 'tx-debit-frozen',
+      walletId: 'w-debit-frozen',
+      currency: 'EUR',
+      amountCents: 1000,
+      actorId: 'system',
+    }),
+    /Wallet is not active/,
+  );
+
+  const state = await repo.getWalletById('w-debit-frozen');
+  assert.equal(state?.balances[0]?.availableCents, 5000);
+});
+ 
 test('5. Concurrent Idempotence: N concurrent calls with same transactionKey create exactly 1 transaction', async () => {
   const prisma = createMockPrismaClient();
   const repo = new PrismaWalletRepository(prisma);
