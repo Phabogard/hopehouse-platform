@@ -112,8 +112,8 @@ export class OrderEngine {
         requesterActorId: input.requesterActorId,
         beneficiaryId: input.beneficiaryId,
         channel: input.channel,
-        amountCents: input.monetaryIntent?.amountCents,
-        currency: input.monetaryIntent?.currency,
+        amountCents: undefined,
+        currency: undefined,
         metadata: input.metadata,
       });
     }
