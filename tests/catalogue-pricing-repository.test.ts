@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { PrismaCatalogRepository } from '../src/infrastructure/prisma/catalogue-repository.js';
+import { resolveOrderPrice } from '../src/modules/catalogue/catalogue-pricing.js';
 
 test('PrismaCatalogRepository treats null startsAt as an already-active price boundary', async () => {
   let capturedWhere: any = null;
@@ -53,4 +54,30 @@ test('PrismaCatalogRepository returns both applicable scopes so the resolver can
 
   assert.equal(rules.length, 2);
   assert.deepEqual(rules.map((rule) => rule.id), ['item-price', 'service-price']);
+});
+
+test('resolveOrderPrice refuses simultaneous service and item rules when no priority is normative', async () => {
+  const now = new Date('2026-09-28T12:00:00.000Z');
+  const service: any = {
+    id: 'service-1', code: 'S1', name: 'Service', type: 'mobile_credit', networkId: null, providerId: null,
+    status: 'active', metadata: {}, createdAt: now, updatedAt: now,
+  };
+  const item: any = {
+    id: 'item-1', catalogId: 'catalog-1', serviceDefinitionId: 'service-1', code: 'I1', name: 'Item', type: 'plan',
+    status: 'active', metadata: {}, validFrom: null, validUntil: null, createdByUserId: null, updatedByUserId: null,
+    createdAt: now, updatedAt: now,
+  };
+  const rule = (id: string, catalogItemId: string | null, amountCents: bigint): any => ({
+    id, serviceDefinitionId: 'service-1', catalogItemId, currency: 'CDF', amountCents,
+    status: 'active', startsAt: null, endsAt: null, metadata: {}, createdAt: now, updatedAt: now,
+  });
+
+  await assert.rejects(
+    resolveOrderPrice({
+      async findServiceById() { return service; },
+      async findItemById() { return item; },
+      async findApplicablePriceRules() { return [rule('item-price', 'item-1', 1000n), rule('service-price', null, 900n)]; },
+    }, { serviceDefinitionId: 'service-1', catalogItemId: 'item-1', at: now }),
+    /Plusieurs prix catalogue sont applicables simultanément/,
+  );
 });
