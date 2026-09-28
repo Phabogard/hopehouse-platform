@@ -64,6 +64,17 @@ paths:
           required: true
           schema:
             type: string
+        - name: Idempotency-Key
+          in: header
+          required: false
+          description: >-
+            Clé d'idempotence de la commande. Pour une même clé et la même
+            transition, un rejeu renvoie la commande déjà persistée sans
+            exécuter une seconde transition. La clé est distincte des
+            transactionKey métier du Wallet.
+          schema:
+            type: string
+            minLength: 1
       requestBody:
         required: true
         content:
