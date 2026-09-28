@@ -274,3 +274,64 @@ test('wallet rollback: frozen wallet is rejected before any balance mutation', {
     await client.$disconnect();
   }
 });
+
+
+test('wallet rollback: same idempotency key cannot replay against another target transaction', { skip: databaseUrl === undefined }, async () => {
+  const client = integrationClient();
+  const repo = new PrismaWalletRepository(client);
+
+  try {
+    const wallet = await repo.createWallet({
+      id: `w-${randomUUID()}`,
+      ownerType: 'USER',
+      ownerId: `u-${randomUUID()}`,
+    });
+
+    await repo.credit({
+      transactionId: `tx-credit-${randomUUID()}`,
+      walletId: wallet.id,
+      currency: 'EUR',
+      amountCents: 10_000,
+      actorId: 'system',
+    });
+
+    const debitOne = await repo.debit({
+      transactionId: `tx-debit-one-${randomUUID()}`,
+      walletId: wallet.id,
+      currency: 'EUR',
+      amountCents: 1_000,
+      actorId: 'system',
+    });
+    const debitTwo = await repo.debit({
+      transactionId: `tx-debit-two-${randomUUID()}`,
+      walletId: wallet.id,
+      currency: 'EUR',
+      amountCents: 1_000,
+      actorId: 'system',
+    });
+
+    await repo.rollbackTransaction({
+      rollbackTransactionId: `tx-rb-one-${randomUUID()}`,
+      targetTransactionId: debitOne.id,
+      walletId: wallet.id,
+      actorId: 'system',
+      transactionKey: 'shared-rollback-key',
+    });
+
+    await assert.rejects(
+      () => repo.rollbackTransaction({
+        rollbackTransactionId: `tx-rb-two-${randomUUID()}`,
+        targetTransactionId: debitTwo.id,
+        walletId: wallet.id,
+        actorId: 'system',
+        transactionKey: 'shared-rollback-key',
+      }),
+      /does not match the requested rollback target/,
+    );
+
+    const state = await repo.getWalletById(wallet.id);
+    assert.equal(state?.balances[0]?.availableCents, 9_000);
+  } finally {
+    await client.$disconnect();
+  }
+});
