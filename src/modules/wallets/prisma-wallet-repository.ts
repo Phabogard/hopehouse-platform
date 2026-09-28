@@ -371,6 +371,8 @@ export class PrismaWalletRepository {
       }
     }
 
+    await this.lockActiveWallet(tx, params.walletId);
+
     const lockedBalance = await tx.$queryRaw<Array<{
       wallet_id: string;
       currency: string;
