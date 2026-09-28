@@ -85,8 +85,10 @@ export class PrismaCatalogRepository implements CatalogRepository, CatalogueOrde
       serviceDefinitionId: params.serviceDefinitionId,
       status: 'active' as const,
       ...(params.currency === undefined ? {} : { currency: params.currency as 'USD' | 'CDF' }),
-      startsAt: { lte: params.at },
-      OR: [{ endsAt: null }, { endsAt: { gt: params.at } }],
+      AND: [
+        { OR: [{ startsAt: null }, { startsAt: { lte: params.at } }] },
+        { OR: [{ endsAt: null }, { endsAt: { gt: params.at } }] },
+      ],
     };
 
     const itemRules = await this.client.priceRule.findMany({ where: { ...where, catalogItemId: params.catalogItemId }, orderBy: [{ startsAt: 'desc' }, { createdAt: 'desc' }] });
