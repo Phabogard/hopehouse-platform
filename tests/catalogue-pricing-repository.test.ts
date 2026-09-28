@@ -30,16 +30,15 @@ test('PrismaCatalogRepository treats null startsAt as an already-active price bo
   });
 });
 
-test('PrismaCatalogRepository keeps item-level priority over service-level pricing', async () => {
-  const calls: any[] = [];
+test('PrismaCatalogRepository returns both applicable scopes so the resolver can reject an undefined priority', async () => {
   const client = {
     priceRule: {
       async findMany({ where }: { where: any }) {
-        calls.push(where);
-        if (where.catalogItemId === 'item-1') {
-          return [{ id: 'item-price', serviceDefinitionId: 'service-1', catalogItemId: 'item-1', currency: 'CDF', amountCents: 1000n, status: 'active', startsAt: null, endsAt: null, metadata: {}, createdAt: new Date(), updatedAt: new Date() }];
-        }
-        return [{ id: 'service-price', serviceDefinitionId: 'service-1', catalogItemId: null, currency: 'CDF', amountCents: 900n, status: 'active', startsAt: null, endsAt: null, metadata: {}, createdAt: new Date(), updatedAt: new Date() }];
+        assert.deepEqual(where.OR, [{ catalogItemId: 'item-1' }, { catalogItemId: null }]);
+        return [
+          { id: 'item-price', serviceDefinitionId: 'service-1', catalogItemId: 'item-1', currency: 'CDF', amountCents: 1000n, status: 'active', startsAt: null, endsAt: null, metadata: {}, createdAt: new Date(), updatedAt: new Date() },
+          { id: 'service-price', serviceDefinitionId: 'service-1', catalogItemId: null, currency: 'CDF', amountCents: 900n, status: 'active', startsAt: null, endsAt: null, metadata: {}, createdAt: new Date(), updatedAt: new Date() },
+        ];
       },
     },
   } as any;
@@ -52,7 +51,6 @@ test('PrismaCatalogRepository keeps item-level priority over service-level prici
     currency: 'CDF',
   });
 
-  assert.equal(rules.length, 1);
-  assert.equal(rules[0]?.id, 'item-price');
-  assert.equal(calls.length, 1);
+  assert.equal(rules.length, 2);
+  assert.deepEqual(rules.map((rule) => rule.id), ['item-price', 'service-price']);
 });
