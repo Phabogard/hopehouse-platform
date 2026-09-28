@@ -313,8 +313,6 @@ export class PrismaWalletRepository {
     const amountBigInt = toSafeBigIntCents(params.amountCents);
     const currency = validateCurrency(params.currency);
 
-    await this.lockActiveWallet(tx, params.walletId);
-
     if (params.transactionKey) {
       const existingTx = await tx.walletTransaction.findFirst({
         where: { walletId: params.walletId, transactionKey: params.transactionKey },
@@ -1080,7 +1078,7 @@ export class PrismaWalletRepository {
 
     if (targetTx.type === WalletTransactionType.RESERVATION_CAPTURE) {
       const res = await tx.walletReservation.findFirst({
-        where: { walletId: params.walletId, createdByTransactionId: targetTx.id },
+        where: { walletId: params.walletId, closedByTransactionId: targetTx.id },
       });
       if (!res) {
         throw new WalletNotFoundError(`Reservation not found for capture transaction: ${targetTx.id}`);
