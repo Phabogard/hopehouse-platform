@@ -135,7 +135,7 @@ function freezeOrder(input: Omit<Order, 'configuration' | 'requester' | 'monetar
     configuration: Object.freeze({ ...input.configuration }),
     requester: Object.freeze({ ...input.requester }),
     monetaryIntent: input.monetaryIntent === null ? null : Object.freeze({ ...input.monetaryIntent }),
-    metadata: deepFreeze({ ...input.metadata }),
+    metadata: deepFreezeClone({ ...input.metadata }),
     transitions: Object.freeze([...input.transitions]),
   });
 }
