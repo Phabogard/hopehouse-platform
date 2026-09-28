@@ -97,13 +97,23 @@ function validateMonetaryIntent(input: OrderMonetaryIntent | null | undefined): 
   return Object.freeze({ amountCents: input.amountCents, currency: input.currency.toUpperCase() });
 }
 
+function deepFreeze<T>(value: T): T {
+  if (value !== null && typeof value === 'object' && !Object.isFrozen(value)) {
+    for (const nestedValue of Object.values(value as Record<string, unknown>)) {
+      deepFreeze(nestedValue);
+    }
+    Object.freeze(value);
+  }
+  return value;
+}
+
 function nextStepAfter(step: OrderStep): OrderStep | null {
   const currentIndex = orderCycle.indexOf(step);
   return orderCycle[currentIndex + 1] ?? null;
 }
 
 function freezeTransition(input: Omit<OrderTransition, 'metadata'> & { metadata?: Record<string, unknown> }): OrderTransition {
-  return Object.freeze({ ...input, metadata: Object.freeze({ ...(input.metadata ?? {}) }) });
+  return Object.freeze({ ...input, metadata: deepFreeze({ ...(input.metadata ?? {}) }) });
 }
 
 function freezeOrder(input: Omit<Order, 'configuration' | 'requester' | 'monetaryIntent' | 'metadata' | 'transitions'> & {
@@ -118,7 +128,7 @@ function freezeOrder(input: Omit<Order, 'configuration' | 'requester' | 'monetar
     configuration: Object.freeze({ ...input.configuration }),
     requester: Object.freeze({ ...input.requester }),
     monetaryIntent: input.monetaryIntent === null ? null : Object.freeze({ ...input.monetaryIntent }),
-    metadata: Object.freeze({ ...input.metadata }),
+    metadata: deepFreeze({ ...input.metadata }),
     transitions: Object.freeze([...input.transitions]),
   });
 }
