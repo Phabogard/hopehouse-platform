@@ -23,6 +23,12 @@ function createMockPrismaClient() {
   const reservations = new Map<string, any>();
   const queryRawImpl = async (strings: any, ...values: any[]) => {
     const query = Array.isArray(strings) ? strings.join('?') : String(strings);
+    if (query.includes('wallets') && query.includes('FOR UPDATE')) {
+      const walletId = values[0];
+      const wallet = wallets.get(walletId);
+      if (!wallet) return [];
+      return [{ id: wallet.id, status: wallet.status }];
+    }
     if (query.includes('wallet_balances') && query.includes('FOR UPDATE')) {
       const walletId = values[0];
       const currency = values[1];
@@ -69,6 +75,13 @@ function createMockPrismaClient() {
           return { ...wallet, balances: wBalances };
         }
         return wallet;
+      },
+      async update({ where, data }: any) {
+        const wallet = wallets.get(where.id);
+        if (!wallet) throw new Error(`Wallet not found: ${where.id}`);
+        const updated = { ...wallet, ...data, updatedAt: new Date() };
+        wallets.set(wallet.id, updated);
+        return updated;
       },
     },
     walletBalance: {
