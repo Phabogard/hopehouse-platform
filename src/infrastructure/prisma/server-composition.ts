@@ -189,6 +189,7 @@ export async function createPrismaHopeHouseServer(options: PrismaHopeHouseServer
     idempotencyStore: idempotency,
     createIdempotencyStore: (tx: unknown) => new PostgresIdempotencyStore(tx as Prisma.TransactionClient),
     pricingRepository: catalogueRepository,
+    createPricingRepository: (tx: unknown) => new PrismaCatalogRepository(tx as Prisma.TransactionClient),
   });
 
   const baseServer = createHopeHouseServer({ authRuntime, audit, orderRepository, orderEngine, notificationDevices });
