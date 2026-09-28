@@ -384,7 +384,13 @@ export class PrismaWalletRepository {
           where: { walletId: params.walletId, transactionKey: params.transactionKey },
         });
         if (winnerTx) {
-          return this.mapTransaction(winnerTx);
+          const mapped = this.mapTransaction(winnerTx);
+          this.assertIdempotentTransaction(mapped, {
+            type: WalletTransactionType.CREDIT,
+            amountCents: params.amountCents,
+            currency: validateCurrency(params.currency),
+          }, params.transactionKey);
+          return mapped;
         }
       }
       throw err;
@@ -967,7 +973,13 @@ export class PrismaWalletRepository {
           where: { walletId: params.walletId, transactionKey: params.transactionKey },
         });
         if (winnerTx) {
-          return this.mapTransaction(winnerTx);
+          const mapped = this.mapTransaction(winnerTx);
+          this.assertIdempotentTransaction(mapped, {
+            type: WalletTransactionType.DEBIT,
+            amountCents: params.amountCents,
+            currency: validateCurrency(params.currency),
+          }, params.transactionKey);
+          return mapped;
         }
       }
       throw err;
