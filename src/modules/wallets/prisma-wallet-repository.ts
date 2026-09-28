@@ -181,6 +181,30 @@ function isTransactionKeyUniqueViolation(err: unknown): boolean {
 export class PrismaWalletRepository {
   constructor(private readonly prisma: PrismaClient) {}
 
+  private assertIdempotentTransaction(
+    existingTx: WalletTransactionDto,
+    expected: {
+      type: WalletTransactionType;
+      amountCents?: number;
+      currency?: string;
+      targetTransactionId?: string;
+    },
+    transactionKey: string,
+  ): void {
+    const typeMatches = existingTx.type === expected.type;
+    const amountMatches = expected.amountCents === undefined || existingTx.amountCents === expected.amountCents;
+    const currencyMatches = expected.currency === undefined || existingTx.currency === expected.currency;
+    const targetMatches =
+      expected.targetTransactionId === undefined ||
+      existingTx.reversalOfTransactionId === expected.targetTransactionId;
+
+    if (!typeMatches || !amountMatches || !currencyMatches || !targetMatches) {
+      throw new WalletConflictError(
+        `Transaction key ${transactionKey} does not match the requested wallet operation`,
+      );
+    }
+  }
+
   async createWallet(params: CreateWalletParams): Promise<WalletDto> {
     const created = await this.prisma.wallet.create({
       data: {
@@ -294,7 +318,13 @@ export class PrismaWalletRepository {
         where: { walletId: params.walletId, transactionKey: params.transactionKey },
       });
       if (existingTx) {
-        return this.mapTransaction(existingTx);
+        const mapped = this.mapTransaction(existingTx);
+        this.assertIdempotentTransaction(mapped, {
+          type: WalletTransactionType.CREDIT,
+          amountCents: params.amountCents,
+          currency,
+        }, params.transactionKey);
+        return mapped;
       }
     }
 
@@ -373,7 +403,13 @@ export class PrismaWalletRepository {
         where: { walletId: params.walletId, transactionKey: params.transactionKey },
       });
       if (existingTx) {
-        return this.mapTransaction(existingTx);
+        const mapped = this.mapTransaction(existingTx);
+        this.assertIdempotentTransaction(mapped, {
+          type: WalletTransactionType.DEBIT,
+          amountCents: params.amountCents,
+          currency,
+        }, params.transactionKey);
+        return mapped;
       }
     }
 
@@ -503,15 +539,22 @@ export class PrismaWalletRepository {
         where: { walletId: params.walletId, transactionKey: params.transactionKey },
       });
       if (existingTx) {
+        const mapped = this.mapTransaction(existingTx);
+        this.assertIdempotentTransaction(mapped, {
+          type: WalletTransactionType.RESERVATION_HOLD,
+          amountCents: params.amountCents,
+          currency,
+        }, params.transactionKey);
         const reservation = await tx.walletReservation.findFirst({
           where: { walletId: params.walletId, createdByTransactionId: existingTx.id },
         });
         if (reservation) {
           return {
-            transaction: this.mapTransaction(existingTx),
+            transaction: mapped,
             reservation: this.mapReservation(reservation),
           };
         }
+        throw new WalletConflictError(`Transaction key ${params.transactionKey} has no reservation for the persisted hold`);
       }
     }
 
