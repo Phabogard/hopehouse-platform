@@ -281,6 +281,8 @@ export class PrismaWalletRepository {
     const amountBigInt = toSafeBigIntCents(params.amountCents);
     const currency = validateCurrency(params.currency);
 
+    await this.lockActiveWallet(tx, params.walletId);
+
     if (params.transactionKey) {
       const existingTx = await tx.walletTransaction.findFirst({
         where: { walletId: params.walletId, transactionKey: params.transactionKey },
@@ -459,6 +461,23 @@ export class PrismaWalletRepository {
         }
       }
       throw err;
+    }
+  }
+
+  private async lockActiveWallet(tx: Prisma.TransactionClient, walletId: string): Promise<void> {
+    const rows = await tx.$queryRaw<Array<{ id: string; status: WalletStatus }>>`
+      SELECT id, status
+      FROM wallets
+      WHERE id = ${walletId}
+      FOR UPDATE
+    `;
+
+    const wallet = rows[0];
+    if (!wallet) {
+      throw new WalletNotFoundError(`Wallet not found: ${walletId}`);
+    }
+    if (wallet.status !== WalletStatus.ACTIVE) {
+      throw new WalletConflictError(`Wallet is not active (current status: ${wallet.status})`);
     }
   }
 
