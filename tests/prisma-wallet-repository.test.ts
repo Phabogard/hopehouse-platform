@@ -526,6 +526,42 @@ test('4. OPTION B: Cross-wallet rollback rejected by composite foreign key (SQLS
   );
 });
 
+test('debit idempotency replay: a conflicting transactionKey never replays a CREDIT as a DEBIT', async () => {
+  const prisma = createMockPrismaClient();
+  const repo = new PrismaWalletRepository(prisma);
+
+  await repo.createWallet({ id: 'w-debit-replay', ownerType: 'USER', ownerId: 'u-debit-replay' });
+
+  const credit = await repo.credit({
+    transactionId: 'tx-credit-replay',
+    walletId: 'w-debit-replay',
+    currency: 'EUR',
+    amountCents: 5000,
+    actorId: 'system',
+    transactionKey: 'shared-key',
+  });
+
+  await assert.rejects(
+    () => repo.debit({
+      transactionId: 'tx-debit-replay',
+      walletId: 'w-debit-replay',
+      currency: 'EUR',
+      amountCents: 5000,
+      actorId: 'system',
+      transactionKey: 'shared-key',
+    }),
+    (err: any) => {
+      assert.equal(err.code, 'WALLET_CONFLICT');
+      assert.match(err.message, /does not match the requested wallet operation/);
+      return true;
+    },
+  );
+
+  assert.equal(credit.type, WalletTransactionType.CREDIT);
+  const state = await repo.getWalletById('w-debit-replay');
+  assert.equal(state?.balances[0]?.availableCents, 5000);
+});
+
 test('wallet debit: frozen wallet is rejected before balance mutation', async () => {
   const prisma = createMockPrismaClient();
   const repo = new PrismaWalletRepository(prisma);
