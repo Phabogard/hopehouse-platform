@@ -25,7 +25,6 @@ export interface OrderCreatePersistenceDependencies {
   readonly prisma: { $transaction<T>(fn: (tx: unknown) => Promise<T>): Promise<T> };
   readonly idempotencyStore: IdempotencyStore;
   readonly createIdempotencyStore: (tx: unknown) => IdempotencyStore;
-  readonly pricingRepository?: CatalogueOrderPricingRepository;
   readonly createPricingRepository?: (tx: unknown) => CatalogueOrderPricingRepository;
 }
 
@@ -150,8 +149,7 @@ export class OrderEngine {
         }
       }
 
-      const pricingRepository = this.createPersistence!.createPricingRepository?.(tx)
-        ?? this.createPersistence!.pricingRepository;
+      const pricingRepository = this.createPersistence!.createPricingRepository?.(tx);
       const resolvedInput = await resolvePersistedInput(input, pricingRepository);
 
       return await this.repository!.create({
