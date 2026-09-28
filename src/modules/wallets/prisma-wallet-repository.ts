@@ -267,6 +267,12 @@ export class PrismaWalletRepository {
           where: { walletId: params.walletId, transactionKey: params.transactionKey },
         });
         if (winnerTx) {
+          if (
+            winnerTx.type !== WalletTransactionType.ROLLBACK ||
+            winnerTx.reversalOfTransactionId !== params.targetTransactionId
+          ) {
+            throw new WalletConflictError(`Transaction key ${params.transactionKey} does not match the requested rollback target`);
+          }
           return this.mapTransaction(winnerTx);
         }
       }
@@ -900,6 +906,12 @@ export class PrismaWalletRepository {
         where: { walletId: params.walletId, transactionKey: params.transactionKey },
       });
       if (existingTx) {
+        if (
+          existingTx.type !== WalletTransactionType.ROLLBACK ||
+          existingTx.reversalOfTransactionId !== params.targetTransactionId
+        ) {
+          throw new WalletConflictError(`Transaction key ${params.transactionKey} does not match the requested rollback target`);
+        }
         return this.mapTransaction(existingTx);
       }
     }
@@ -930,6 +942,12 @@ export class PrismaWalletRepository {
         where: { walletId: params.walletId, transactionKey: params.transactionKey },
       });
       if (existingTx) {
+        if (
+          existingTx.type !== WalletTransactionType.ROLLBACK ||
+          existingTx.reversalOfTransactionId !== params.targetTransactionId
+        ) {
+          throw new WalletConflictError(`Transaction key ${params.transactionKey} does not match the requested rollback target`);
+        }
         return this.mapTransaction(existingTx);
       }
     }
