@@ -738,3 +738,54 @@ test('10. P2002 strict classification: TEST D — missing target propagates erro
     }
   );
 });
+
+
+test('wallet transaction idempotency key is bound to credit operation parameters', { skip: databaseUrl === undefined }, async () => {
+  const client = integrationClient();
+  const repo = new PrismaWalletRepository(client);
+  try {
+    const wallet = await repo.createWallet({ id: `w-${randomUUID()}`, ownerType: 'USER', ownerId: `u-${randomUUID()}` });
+    await repo.credit({
+      transactionId: `tx-credit-${randomUUID()}`, walletId: wallet.id, currency: 'EUR',
+      amountCents: 1_000, actorId: 'system', transactionKey: 'credit-key',
+    });
+    await assert.rejects(
+      () => repo.credit({
+        transactionId: `tx-credit-replay-${randomUUID()}`, walletId: wallet.id, currency: 'EUR',
+        amountCents: 2_000, actorId: 'system', transactionKey: 'credit-key',
+      }),
+      /does not match the requested wallet operation/,
+    );
+    const state = await repo.getWalletById(wallet.id);
+    assert.equal(state?.balances[0]?.availableCents, 1_000);
+  } finally {
+    await client.$disconnect();
+  }
+});
+
+test('wallet transaction idempotency key is bound to debit operation parameters', { skip: databaseUrl === undefined }, async () => {
+  const client = integrationClient();
+  const repo = new PrismaWalletRepository(client);
+  try {
+    const wallet = await repo.createWallet({ id: `w-${randomUUID()}`, ownerType: 'USER', ownerId: `u-${randomUUID()}` });
+    await repo.credit({
+      transactionId: `tx-credit-${randomUUID()}`, walletId: wallet.id, currency: 'EUR',
+      amountCents: 5_000, actorId: 'system',
+    });
+    await repo.debit({
+      transactionId: `tx-debit-${randomUUID()}`, walletId: wallet.id, currency: 'EUR',
+      amountCents: 1_000, actorId: 'system', transactionKey: 'debit-key',
+    });
+    await assert.rejects(
+      () => repo.debit({
+        transactionId: `tx-debit-replay-${randomUUID()}`, walletId: wallet.id, currency: 'EUR',
+        amountCents: 2_000, actorId: 'system', transactionKey: 'debit-key',
+      }),
+      /does not match the requested wallet operation/,
+    );
+    const state = await repo.getWalletById(wallet.id);
+    assert.equal(state?.balances[0]?.availableCents, 4_000);
+  } finally {
+    await client.$disconnect();
+  }
+});
