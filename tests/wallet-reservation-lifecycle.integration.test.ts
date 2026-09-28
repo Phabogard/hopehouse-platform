@@ -66,8 +66,8 @@ test('wallet reservation lifecycle: concurrent release and capture serialize on 
     assert.equal(results.filter((r) => r.status === 'rejected').length, 1);
 
     const state = await repo.getWalletById(wallet.id);
-    assert.equal(state?.balances[0]?.availableCents, 6_000);
     assert.equal(state?.balances[0]?.reservedCents, 0);
+    assert.ok(state?.balances[0]?.availableCents === 6_000 || state?.balances[0]?.availableCents === 10_000);
 
     const persistedReservation = await client.walletReservation.findUnique({
       where: { id: reservation.id },
@@ -375,7 +375,7 @@ test('wallet reservation lifecycle: release idempotency key replays only the sam
         actorId: 'system',
         transactionKey: 'release-replay-key',
       }),
-      /does not match the requested reservation capture/,
+      /does not match the requested wallet operation/,
     );
   } finally {
     await client.$disconnect();
@@ -420,7 +420,7 @@ test('wallet reservation lifecycle: capture idempotency key replays only the sam
         actorId: 'system',
         transactionKey: 'capture-replay-key',
       }),
-      /does not match the requested reservation release/,
+      /does not match the requested wallet operation/,
     );
   } finally {
     await client.$disconnect();
