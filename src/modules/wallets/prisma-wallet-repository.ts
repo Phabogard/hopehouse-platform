@@ -488,6 +488,8 @@ export class PrismaWalletRepository {
     const amountBigInt = toSafeBigIntCents(params.amountCents);
     const currency = validateCurrency(params.currency);
 
+    await this.lockActiveWallet(tx, params.walletId);
+
     if (params.transactionKey) {
       const existingTx = await tx.walletTransaction.findFirst({
         where: { walletId: params.walletId, transactionKey: params.transactionKey },
