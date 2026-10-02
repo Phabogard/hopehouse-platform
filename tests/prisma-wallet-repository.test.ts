@@ -23,6 +23,37 @@ function createMockPrismaClient() {
   const reservations = new Map<string, any>();
   const queryRawImpl = async (strings: any, ...values: any[]) => {
     const query = Array.isArray(strings) ? strings.join('?') : String(strings);
+    if (query.includes('wallets') && query.includes('FOR UPDATE')) {
+      const walletId = values[0];
+      const wallet = wallets.get(walletId);
+      if (!wallet) return [];
+      return [{ id: wallet.id, status: wallet.status }];
+    }
+    if (query.includes('wallet_reservations') && query.includes('FOR UPDATE')) {
+      const reservationId = values[0];
+      const reservation = reservations.get(reservationId);
+      if (!reservation) return [];
+      return [{
+        id: reservation.id,
+        wallet_id: reservation.walletId,
+        currency: reservation.currency,
+        amount_cents: reservation.amountCents,
+        status: reservation.status,
+        related_entity_type: reservation.relatedEntityType ?? null,
+        related_entity_id: reservation.relatedEntityId ?? null,
+        created_by_transaction_id: reservation.createdByTransactionId,
+        closed_by_transaction_id: reservation.closedByTransactionId ?? null,
+        created_at: reservation.createdAt,
+        updated_at: reservation.updatedAt,
+        metadata_json: reservation.metadataJson,
+      }];
+    }
+    if (query.includes('wallet_transactions') && query.includes('FOR UPDATE')) {
+      const transactionId = values[0];
+      const transaction = transactions.get(transactionId);
+      if (!transaction) return [];
+      return [{ id: transaction.id }];
+    }
     if (query.includes('wallet_balances') && query.includes('FOR UPDATE')) {
       const walletId = values[0];
       const currency = values[1];
@@ -69,6 +100,13 @@ function createMockPrismaClient() {
           return { ...wallet, balances: wBalances };
         }
         return wallet;
+      },
+      async update({ where, data }: any) {
+        const wallet = wallets.get(where.id);
+        if (!wallet) throw new Error(`Wallet not found: ${where.id}`);
+        const updated = { ...wallet, ...data, updatedAt: new Date() };
+        wallets.set(wallet.id, updated);
+        return updated;
       },
     },
     walletBalance: {
@@ -488,6 +526,75 @@ test('4. OPTION B: Cross-wallet rollback rejected by composite foreign key (SQLS
   );
 });
 
+test('debit idempotency replay: a conflicting transactionKey never replays a CREDIT as a DEBIT', async () => {
+  const prisma = createMockPrismaClient();
+  const repo = new PrismaWalletRepository(prisma);
+
+  await repo.createWallet({ id: 'w-debit-replay', ownerType: 'USER', ownerId: 'u-debit-replay' });
+
+  const credit = await repo.credit({
+    transactionId: 'tx-credit-replay',
+    walletId: 'w-debit-replay',
+    currency: 'EUR',
+    amountCents: 5000,
+    actorId: 'system',
+    transactionKey: 'shared-key',
+  });
+
+  await assert.rejects(
+    () => repo.debit({
+      transactionId: 'tx-debit-replay',
+      walletId: 'w-debit-replay',
+      currency: 'EUR',
+      amountCents: 5000,
+      actorId: 'system',
+      transactionKey: 'shared-key',
+    }),
+    (err: any) => {
+      assert.equal(err.code, 'WALLET_CONFLICT');
+      assert.match(err.message, /does not match the requested wallet operation/);
+      return true;
+    },
+  );
+
+  assert.equal(credit.type, WalletTransactionType.CREDIT);
+  const state = await repo.getWalletById('w-debit-replay');
+  assert.equal(state?.balances[0]?.availableCents, 5000);
+});
+
+test('wallet debit: frozen wallet is rejected before balance mutation', async () => {
+  const prisma = createMockPrismaClient();
+  const repo = new PrismaWalletRepository(prisma);
+
+  await repo.createWallet({ id: 'w-debit-frozen', ownerType: 'USER', ownerId: 'u-debit-frozen' });
+  await repo.credit({
+    transactionId: 'tx-debit-frozen-credit',
+    walletId: 'w-debit-frozen',
+    currency: 'EUR',
+    amountCents: 5000,
+    actorId: 'system',
+  });
+
+  await prisma.wallet.update({
+    where: { id: 'w-debit-frozen' },
+    data: { status: 'FROZEN' },
+  });
+
+  await assert.rejects(
+    () => repo.debit({
+      transactionId: 'tx-debit-frozen',
+      walletId: 'w-debit-frozen',
+      currency: 'EUR',
+      amountCents: 1000,
+      actorId: 'system',
+    }),
+    /Wallet is not active/,
+  );
+
+  const state = await repo.getWalletById('w-debit-frozen');
+  assert.equal(state?.balances[0]?.availableCents, 5000);
+});
+
 test('5. Concurrent Idempotence: N concurrent calls with same transactionKey create exactly 1 transaction', async () => {
   const prisma = createMockPrismaClient();
   const repo = new PrismaWalletRepository(prisma);
@@ -704,4 +811,165 @@ test('10. P2002 strict classification: TEST D — missing target propagates erro
       return true;
     }
   );
+});
+
+
+test("reserve() idempotency scenarios A-E", async () => {
+  const prisma = createMockPrismaClient();
+  const repo = new PrismaWalletRepository(prisma);
+
+  await repo.createWallet({ id: "W1", ownerType: "USER", ownerId: "u-1" });
+  await repo.createWallet({ id: "W2", ownerType: "USER", ownerId: "u-2" });
+
+  // Fund W1 and W2
+  await repo.credit({
+    transactionId: "tx-fund-w1",
+    walletId: "W1",
+    currency: "EUR",
+    amountCents: 50000,
+    actorId: "system",
+  });
+  await repo.credit({
+    transactionId: "tx-fund-w2",
+    walletId: "W2",
+    currency: "EUR",
+    amountCents: 50000,
+    actorId: "system",
+  });
+
+  // Scenario A — Identical Replay
+  const resA1 = await repo.reserve({
+    reservationId: "res-a1",
+    transactionId: "tx-a1",
+    walletId: "W1",
+    currency: "EUR",
+    amountCents: 10000,
+    actorId: "system",
+    transactionKey: "KEY_A",
+  });
+  const resA2 = await repo.reserve({
+    reservationId: "res-a2",
+    transactionId: "tx-a2",
+    walletId: "W1",
+    currency: "EUR",
+    amountCents: 10000,
+    actorId: "system",
+    transactionKey: "KEY_A",
+  });
+
+  assert.equal(resA1.transaction.id, resA2.transaction.id);
+  assert.equal(resA1.reservation.id, resA2.reservation.id);
+  const stateA = await repo.getWalletById("W1");
+  const balA = stateA?.balances.find((b) => b.currency === "EUR");
+  assert.equal(balA?.availableCents, 40000);
+  assert.equal(balA?.reservedCents, 10000);
+
+  // Scenario B — Different Amount
+  await assert.rejects(
+    () => repo.reserve({
+      reservationId: "res-b",
+      transactionId: "tx-b",
+      walletId: "W1",
+      currency: "EUR",
+      amountCents: 5000,
+      actorId: "system",
+      transactionKey: "KEY_A",
+    }),
+    (err: any) => {
+      assert.equal(err.code, "WALLET_CONFLICT");
+      return true;
+    }
+  );
+  const stateB = await repo.getWalletById("W1");
+  const balB = stateB?.balances.find((b) => b.currency === "EUR");
+  assert.equal(balB?.availableCents, 40000);
+  assert.equal(balB?.reservedCents, 10000);
+
+  // Scenario C — Different Currency
+  await assert.rejects(
+    () => repo.reserve({
+      reservationId: "res-c",
+      transactionId: "tx-c",
+      walletId: "W1",
+      currency: "USD",
+      amountCents: 10000,
+      actorId: "system",
+      transactionKey: "KEY_A",
+    }),
+    (err: any) => {
+      assert.equal(err.code, "WALLET_CONFLICT");
+      return true;
+    }
+  );
+
+  // Scenario D — Different Wallet
+  // Note: Since transaction_key unique index in DB is (wallet_id, transaction_key),
+  // reserve() finds existingTx scoped by (walletId, transactionKey).
+  // On W2, existingTx for KEY_A is null, so it proceeds to try reserveWithinTransaction.
+  // W2 has 50000 available EUR, so it creates a new reservation on W2 for KEY_A.
+  // BUT if KEY_A was intended globally, or if W2 already had KEY_A, it would conflict.
+  // Testing reserve with KEY_A on W2:
+  const resD = await repo.reserve({
+    reservationId: "res-d",
+    transactionId: "tx-d",
+    walletId: "W2",
+    currency: "EUR",
+    amountCents: 10000,
+    actorId: "system",
+    transactionKey: "KEY_A",
+  });
+  assert.equal(resD.transaction.walletId, "W2");
+  // A second call on W2 with KEY_A and different amount (e.g. 5000) throws WALLET_CONFLICT:
+  await assert.rejects(
+    () => repo.reserve({
+      reservationId: "res-d2",
+      transactionId: "tx-d2",
+      walletId: "W2",
+      currency: "EUR",
+      amountCents: 5000,
+      actorId: "system",
+      transactionKey: "KEY_A",
+    }),
+    (err: any) => {
+      assert.equal(err.code, "WALLET_CONFLICT");
+      return true;
+    }
+  );
+
+  // Scenario E — Concurrency with conflicting params
+  const keyE = "KEY_CONCURRENT_E";
+  const p1 = repo.reserve({
+    reservationId: "res-e1",
+    transactionId: "tx-e1",
+    walletId: "W1",
+    currency: "EUR",
+    amountCents: 10000,
+    actorId: "system",
+    transactionKey: keyE,
+  });
+  const p2 = repo.reserve({
+    reservationId: "res-e2",
+    transactionId: "tx-e2",
+    walletId: "W1",
+    currency: "EUR",
+    amountCents: 5000,
+    actorId: "system",
+    transactionKey: keyE,
+  });
+
+  const settled = await Promise.allSettled([p1, p2]);
+  const fulfilled = settled.filter((s) => s.status === "fulfilled");
+  const rejected = settled.filter((s) => s.status === "rejected");
+
+  assert.equal(fulfilled.length, 1);
+  assert.equal(rejected.length, 1);
+  assert.equal((rejected[0] as PromiseRejectedResult).reason.code, "WALLET_CONFLICT");
+
+  // Financial verification after concurrent conflict
+  const winner = (fulfilled[0] as PromiseFulfilledResult<any>).value;
+  const winnerAmount = winner.reservation.amountCents;
+  const stateE = await repo.getWalletById("W1");
+  const balE = stateE?.balances.find((b) => b.currency === "EUR");
+  assert.equal(balE?.availableCents, 40000 - winnerAmount);
+  assert.equal(balE?.reservedCents, 10000 + winnerAmount);
 });
