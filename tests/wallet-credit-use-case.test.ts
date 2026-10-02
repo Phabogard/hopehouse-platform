@@ -234,6 +234,33 @@ test('idempotence: un deuxième appel avec la même Idempotency-Key ne recrédit
   assert.equal(harness.outboxEvents.length, 1, 'un seul événement Outbox doit être créé');
 });
 
+test('idempotency: la même clé ne peut pas rejouer un crédit avec un montant différent', async () => {
+  const harness = buildHarness();
+  const idempotencyKey = randomUUID();
+
+  await harness.useCase.execute({
+    walletId: 'wallet-1',
+    currency: 'USD',
+    amountCents: 1_000,
+    actorId: 'actor-1',
+    idempotencyKey,
+  });
+
+  await assert.rejects(
+    () => harness.useCase.execute({
+      walletId: 'wallet-1',
+      currency: 'USD',
+      amountCents: 500,
+      actorId: 'actor-1',
+      idempotencyKey,
+    }),
+    isTransactionKeyConflictError,
+  );
+
+  assert.equal(harness.creditCalls.length, 1);
+  assert.equal(harness.transactions.size, 1);
+});
+
 test('deux appels concurrents (Promise.all) avec la même Idempotency-Key: une seule opération effective', async () => {
   const harness = buildHarness();
   const idempotencyKey = randomUUID();

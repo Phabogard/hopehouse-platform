@@ -6,6 +6,20 @@ import type { OrderRepository, CreateOrderParams, AdvanceOrderTransactionalParam
 import type { AuditLogRepository } from '../../modules/audit/audit-log.js';
 import { assertOrderTransition } from '../../modules/orders/orders.js';
 
+function deepFreezeClone<T>(value: T): T {
+  if (Array.isArray(value)) {
+    return Object.freeze(value.map((nestedValue) => deepFreezeClone(nestedValue))) as T;
+  }
+  if (value !== null && typeof value === 'object') {
+    const clone: Record<string, unknown> = {};
+    for (const [key, nestedValue] of Object.entries(value as Record<string, unknown>)) {
+      clone[key] = deepFreezeClone(nestedValue);
+    }
+    return Object.freeze(clone) as T;
+  }
+  return value;
+}
+
 export function toSafeBigIntCents(amount: number | bigint | null | undefined): bigint | null {
   if (amount === null || amount === undefined) return null;
   if (typeof amount === 'bigint') {
@@ -357,7 +371,7 @@ export class PrismaOrderRepository implements OrderRepository {
       beneficiaryId: row.beneficiaryId,
       channel: row.channel,
       monetaryIntent,
-      metadata: Object.freeze(metadata),
+      metadata: deepFreezeClone(metadata),
       transitions: Object.freeze(row.transitions.map((t) => this.mapTransition(t))),
       createdAt: row.createdAt.toISOString(),
       updatedAt: row.updatedAt.toISOString(),
@@ -386,7 +400,7 @@ export class PrismaOrderRepository implements OrderRepository {
       outcome: t.outcome as OrderTransitionOutcome,
       actorId: t.actorId,
       occurredAt: t.occurredAt.toISOString(),
-      metadata: Object.freeze(metadata),
+      metadata: deepFreezeClone(metadata),
     });
   }
 }
