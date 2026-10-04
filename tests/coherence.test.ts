@@ -492,3 +492,38 @@ test('notification device persistence stays provider-independent across Prisma s
   assert.equal(repository.includes('notificationDevice.upsert'), true);
   assert.equal(composition.includes('new PrismaNotificationDeviceRepository(client)'), true);
 });
+
+
+test("notification delivery persistence aligns across Prisma schema, migration, and repository", () => {
+  const migration = readProjectFile("prisma/migrations/20260922180000_notification_delivery_ledger/migration.sql");
+  const prisma = readProjectFile("prisma/schema.prisma");
+  const deliveryModule = readProjectFile("src/modules/notifications/notification-delivery.ts");
+  const repository = readProjectFile("src/infrastructure/prisma/notification-delivery-repository.ts");
+  const composition = readProjectFile("src/infrastructure/prisma/server-composition.ts");
+
+  assert.match(migration, /CREATE TABLE "notification_deliveries"/);
+  for (const indexName of [
+    "notification_deliveries_key_device_unique",
+    "notification_deliveries_status_updated_at_idx",
+    "notification_deliveries_device_created_at_idx",
+  ]) {
+    assert.equal(migration.includes(indexName), true, indexName);
+  }
+
+  for (const field of [
+    "model NotificationDelivery",
+    "deduplicationKey  String   @map(\"deduplication_key\")",
+    "deviceId          String   @map(\"device_id\")",
+    "provider          String",
+    "status            String",
+    "@@unique([deduplicationKey, deviceId]",
+    "@@map(\"notification_deliveries\")",
+  ]) {
+    assert.equal(prisma.includes(field), true, field);
+  }
+
+  assert.equal(deliveryModule.includes("export interface NotificationDeliveryRepository"), true);
+  assert.equal(repository.includes("export class PrismaNotificationDeliveryRepository"), true);
+  assert.equal(repository.includes("ON CONFLICT (\"deduplication_key\", \"device_id\") DO NOTHING"), true);
+  assert.equal(composition.includes("new PrismaNotificationDeliveryRepository(client)"), true);
+});
