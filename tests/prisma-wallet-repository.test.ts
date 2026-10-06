@@ -276,7 +276,23 @@ function createMockPrismaClient() {
         return res;
       },
     },
+    txMutex: Promise.resolve(),
     async $transaction(callback: (tx: any) => Promise<any>) {
+      let releaseLock: () => void = () => {};
+      const nextLock = new Promise<void>((resolve) => {
+        releaseLock = resolve;
+      });
+      const currentLock = this.txMutex;
+      this.txMutex = this.txMutex.then(() => nextLock);
+
+      await currentLock;
+      try {
+        return await this.runTransaction(callback);
+      } finally {
+        releaseLock();
+      }
+    },
+    async runTransaction(callback: (tx: any) => Promise<any>) {
       const createdWallets: string[] = [];
       const createdTransactions: string[] = [];
       const createdReservations: string[] = [];
@@ -972,4 +988,99 @@ test("reserve() idempotency scenarios A-E", async () => {
   const balE = stateE?.balances.find((b) => b.currency === "EUR");
   assert.equal(balE?.availableCents, 40000 - winnerAmount);
   assert.equal(balE?.reservedCents, 10000 + winnerAmount);
+});
+
+
+test("11. 10 concurrent calls to reserve() with identical transactionKey produce exactly 1 reservation", async () => {
+  const prisma = createMockPrismaClient();
+  const repo = new PrismaWalletRepository(prisma);
+
+  await repo.createWallet({ id: "w-conc-10", ownerType: "USER", ownerId: "u-conc-10" });
+  await repo.credit({
+    transactionId: "tx-fund-conc-10",
+    walletId: "w-conc-10",
+    currency: "EUR",
+    amountCents: 50000,
+    actorId: "system",
+  });
+
+  const promises = Array.from({ length: 10 }).map((_, i) =>
+    repo.reserve({
+      reservationId: "res-conc-" + i,
+      transactionId: "tx-conc-" + i,
+      walletId: "w-conc-10",
+      currency: "EUR",
+      amountCents: 10000,
+      actorId: "system",
+      transactionKey: "KEY_CONCURRENT_10",
+    })
+  );
+
+  const results = await Promise.all(promises);
+  assert.equal(results.length, 10);
+
+  // All 10 returned identical transaction ID and reservation ID
+  const firstTxId = results[0].transaction.id;
+  const firstResId = results[0].reservation.id;
+  for (const r of results) {
+    assert.equal(r.transaction.id, firstTxId);
+    assert.equal(r.reservation.id, firstResId);
+    assert.equal(r.transaction.amountCents, 10000);
+    assert.equal(r.reservation.amountCents, 10000);
+  }
+
+  // Financial balance deducted strictly ONCE
+  const state = await repo.getWalletById("w-conc-10");
+  const bal = state?.balances.find((b) => b.currency === "EUR");
+  assert.equal(bal?.availableCents, 40000);
+  assert.equal(bal?.reservedCents, 10000);
+});
+
+test("12. Concurrent reserve() calls with different transactionKeys competing for funds prevent over-reservation", async () => {
+  const prisma = createMockPrismaClient();
+  const repo = new PrismaWalletRepository(prisma);
+
+  await repo.createWallet({ id: "w-compete", ownerType: "USER", ownerId: "u-compete" });
+  await repo.credit({
+    transactionId: "tx-fund-compete",
+    walletId: "w-compete",
+    currency: "EUR",
+    amountCents: 15000, // Available = 15000
+    actorId: "system",
+  });
+
+  // 2 distinct reservation requests competing for 10000 each (Total 20000 > 15000 available)
+  const req1 = repo.reserve({
+    reservationId: "res-comp1",
+    transactionId: "tx-comp1",
+    walletId: "w-compete",
+    currency: "EUR",
+    amountCents: 10000,
+    actorId: "system",
+    transactionKey: "KEY_COMPETE_1",
+  });
+
+  const req2 = repo.reserve({
+    reservationId: "res-comp2",
+    transactionId: "tx-comp2",
+    walletId: "w-compete",
+    currency: "EUR",
+    amountCents: 10000,
+    actorId: "system",
+    transactionKey: "KEY_COMPETE_2",
+  });
+
+  const settled = await Promise.allSettled([req1, req2]);
+  const fulfilled = settled.filter((s) => s.status === "fulfilled");
+  const rejected = settled.filter((s) => s.status === "rejected");
+
+  assert.equal(fulfilled.length, 1);
+  assert.equal(rejected.length, 1);
+  assert.match((rejected[0] as PromiseRejectedResult).reason.message, /Insufficient available balance/);
+
+  // Balance guardrail: available balance must not go below 0
+  const state = await repo.getWalletById("w-compete");
+  const bal = state?.balances.find((b) => b.currency === "EUR");
+  assert.equal(bal?.availableCents, 5000);
+  assert.equal(bal?.reservedCents, 10000);
 });
