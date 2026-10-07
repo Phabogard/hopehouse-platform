@@ -2,6 +2,9 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { OrderEngine, advanceOrder, assertOrderTransition, createOrder, isOrderComplete, orderCycle, type OrderStep } from '../src/modules/orders/index.js';
 import { toSafeBigIntCents, fromSafeBigIntCents } from '../src/infrastructure/prisma/order-repository.js';
+import type { OrderRepository } from '../src/modules/orders/order-repository.js';
+import type { CatalogueOrderPricingRepository } from '../src/modules/catalogue/catalogue-pricing.js';
+import type { CatalogItem, PriceRule, ServiceDefinition } from '../src/modules/catalogue/catalogue.js';
 
 test('order cycle exposes the official ordered states', () => {
   assert.equal(JSON.stringify(orderCycle), JSON.stringify(['creation', 'validation', 'payment', 'execution', 'notification', 'receipt', 'history', 'audit']));
@@ -48,6 +51,156 @@ test('order state machine accepts only the official forward transition sequence'
 
   assert.throws(() => advanceOrder({ order: validated, actorId: 'actor-2', expectedFromStep: 'creation', toStep: 'payment' }), /L'état courant/);
   assert.throws(() => advanceOrder({ order: validated, actorId: 'actor-2', expectedFromStep: 'validation', toStep: 'notification' }), /Transition de commande invalide/);
+});
+
+
+test('OrderEngine resolves catalogue pricing inside the same persistence transaction as order creation', async () => {
+  const service: ServiceDefinition = {
+    id: 'service-tx', code: 'TX', name: 'Transactional service', type: 'mobile_credit', networkId: null, providerId: null,
+    status: 'active', metadata: {}, createdAt: new Date('2026-01-01T00:00:00Z'), updatedAt: new Date('2026-01-01T00:00:00Z'),
+  };
+  const item: CatalogItem = {
+    id: 'item-tx', catalogId: 'catalog-tx', serviceDefinitionId: service.id, code: 'TX-ITEM', name: 'Transactional item', type: 'plan',
+    status: 'active', metadata: {}, validFrom: null, validUntil: null, createdByUserId: null, updatedByUserId: null,
+    createdAt: new Date('2026-01-01T00:00:00Z'), updatedAt: new Date('2026-01-01T00:00:00Z'),
+  };
+  const rule: PriceRule = {
+    id: 'price-tx', serviceDefinitionId: service.id, catalogItemId: item.id, currency: 'CDF', amountCents: 500000n,
+    status: 'active', startsAt: new Date('2026-01-01T00:00:00Z'), endsAt: null, metadata: {},
+    createdAt: new Date('2026-01-01T00:00:00Z'), updatedAt: new Date('2026-01-01T00:00:00Z'),
+  };
+
+  let transactionActive = false;
+  let factoryCalledInsideTransaction = false;
+  let pricingCalledInsideTransaction = false;
+  let repositoryCreateTx: unknown;
+  const transactionClient = { name: 'tx-client' };
+
+  const pricingRepository = (tx: unknown): CatalogueOrderPricingRepository => ({
+    async findServiceById() { pricingCalledInsideTransaction ||= transactionActive && tx === transactionClient; return service; },
+    async findItemById() { pricingCalledInsideTransaction ||= transactionActive && tx === transactionClient; return item; },
+    async findApplicablePriceRules() { pricingCalledInsideTransaction ||= transactionActive && tx === transactionClient; return [rule]; },
+  });
+
+  const orderRepository: OrderRepository = {
+    async create(params, tx) {
+      repositoryCreateTx = tx;
+      return createOrder({
+        requesterActorId: params.requesterActorId,
+        serviceDefinitionId: params.serviceDefinitionId,
+        catalogItemId: params.catalogItemId,
+        mode: params.mode,
+        beneficiaryId: params.beneficiaryId ?? undefined,
+        channel: params.channel ?? undefined,
+        monetaryIntent: params.amountCents === undefined || params.amountCents === null || params.currency === undefined || params.currency === null
+          ? undefined
+          : { amountCents: Number(params.amountCents), currency: params.currency },
+        metadata: params.metadata,
+      });
+    },
+    async getById() { return null; },
+    async getByOrderNumber() { return null; },
+    async advanceWithLock() { throw new Error('not used'); },
+    async getTransitionHistory() { return []; },
+  };
+
+  const engine = new OrderEngine({}, orderRepository, {
+    prisma: {
+      async $transaction(fn) {
+        transactionActive = true;
+        try { return await fn(transactionClient); } finally { transactionActive = false; }
+      },
+    },
+    idempotencyStore: { async find() { return null; }, async save() { return true; } },
+    createIdempotencyStore: () => ({ async find() { return null; }, async save() { return true; } }),
+    createPricingRepository: (tx) => { factoryCalledInsideTransaction ||= transactionActive && tx === transactionClient; return pricingRepository(tx); },
+  });
+
+  const order = await engine.createPersisted({
+    requesterActorId: 'actor-tx', serviceDefinitionId: service.id, catalogItemId: item.id, mode: 'manual',
+    monetaryIntent: { amountCents: 500000, currency: 'CDF' },
+  });
+
+  assert.equal(factoryCalledInsideTransaction, true);
+  assert.equal(pricingCalledInsideTransaction, true);
+  assert.equal(repositoryCreateTx, transactionClient);
+  assert.equal(order.monetaryIntent?.amountCents, 500000);
+  assert.equal(order.monetaryIntent?.currency, 'CDF');
+});
+
+test('OrderEngine freezes the catalogue pricing snapshot at every metadata depth', async () => {
+  const service: ServiceDefinition = {
+    id: 'service-snapshot', code: 'SNAP', name: 'Snapshot service', type: 'mobile_credit', networkId: null, providerId: null,
+    status: 'active', metadata: {}, createdAt: new Date('2026-01-01T00:00:00Z'), updatedAt: new Date('2026-01-01T00:00:00Z'),
+  };
+  const item: CatalogItem = {
+    id: 'item-snapshot', catalogId: 'catalog-snapshot', serviceDefinitionId: service.id, code: 'SNAP-ITEM', name: 'Snapshot item', type: 'plan',
+    status: 'active', metadata: {}, validFrom: null, validUntil: null, createdByUserId: null, updatedByUserId: null,
+    createdAt: new Date('2026-01-01T00:00:00Z'), updatedAt: new Date('2026-01-01T00:00:00Z'),
+  };
+  const rule: PriceRule = {
+    id: 'price-snapshot', serviceDefinitionId: service.id, catalogItemId: item.id, currency: 'CDF', amountCents: 500000n,
+    status: 'active', startsAt: new Date('2026-01-01T00:00:00Z'), endsAt: null, metadata: {},
+    createdAt: new Date('2026-01-01T00:00:00Z'), updatedAt: new Date('2026-01-01T00:00:00Z'),
+  };
+
+  const repository: OrderRepository = {
+    async create(params) {
+      return createOrder({
+        requesterActorId: params.requesterActorId,
+        serviceDefinitionId: params.serviceDefinitionId,
+        catalogItemId: params.catalogItemId,
+        mode: params.mode,
+        monetaryIntent: params.amountCents === undefined || params.amountCents === null || params.currency === undefined || params.currency === null
+          ? undefined
+          : { amountCents: Number(params.amountCents), currency: params.currency },
+        metadata: params.metadata,
+      });
+    },
+    async getById() { return null; },
+    async getByOrderNumber() { return null; },
+    async advanceWithLock() { throw new Error('not used'); },
+    async getTransitionHistory() { return []; },
+  };
+
+  const engine = new OrderEngine({}, repository, {
+    prisma: {
+      async $transaction(fn) { return fn({ name: 'tx' }); },
+    },
+    idempotencyStore: { async find() { return null; }, async save() { return true; } },
+    createIdempotencyStore: () => ({ async find() { return null; }, async save() { return true; } }),
+    createPricingRepository: () => ({
+      async findServiceById() { return service; },
+      async findItemById() { return item; },
+      async findApplicablePriceRules() { return [rule]; },
+    }),
+  });
+
+  const order = await engine.createPersisted({
+    requesterActorId: 'actor-snapshot',
+    serviceDefinitionId: service.id,
+    catalogItemId: item.id,
+    mode: 'manual',
+    monetaryIntent: { amountCents: 500000, currency: 'CDF' },
+  });
+
+  const pricing = order.metadata.pricing as Record<string, unknown>;
+  assert.equal(pricing.ruleId, rule.id);
+  assert.equal(pricing.amountCents, 500000);
+  assert.equal(pricing.currency, 'CDF');
+  assert.equal(Object.isFrozen(pricing), true);
+  assert.throws(() => { pricing.amountCents = 1; }, TypeError);
+  assert.equal((order.metadata.pricing as Record<string, unknown>).amountCents, 500000);
+
+  const callerMetadata = { nested: { amountCents: 123 } };
+  const callerOrder = createOrder({
+    requesterActorId: 'actor-metadata',
+    serviceDefinitionId: service.id,
+    mode: 'manual',
+    metadata: callerMetadata,
+  });
+  assert.equal((callerOrder.metadata.nested as Record<string, unknown>).amountCents, 123);
+  assert.equal(Object.isFrozen(callerMetadata.nested), false);
 });
 
 test('OrderEngine runs generic handlers in sequence without embedding service-specific business logic', async () => {

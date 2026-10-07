@@ -808,3 +808,87 @@ test('Wallet <-> Order transaction: I. repeated transition with same Idempotency
     await client.$disconnect();
   }
 });
+
+
+test('Wallet <-> Order transaction: payment rejects a frozen wallet before creating a reservation', { skip: databaseUrl === undefined }, async () => {
+  const client = integrationClient();
+  const orderRepo = new PrismaOrderRepository(client);
+  const walletRepo = new PrismaWalletRepository(client);
+
+  try {
+    const { serviceId } = await createTestServiceAndCatalogItem(client);
+    const requesterId = `u-${randomUUID()}`;
+    const wallet = await walletRepo.createWallet({
+      id: `w-${randomUUID()}`,
+      ownerType: 'USER',
+      ownerId: requesterId,
+    });
+
+    await walletRepo.credit({
+      transactionId: `tx-init-${randomUUID()}`,
+      walletId: wallet.id,
+      currency: 'EUR',
+      amountCents: 10_000,
+      actorId: 'system',
+    });
+
+    await client.wallet.update({
+      where: { id: wallet.id },
+      data: { status: 'FROZEN' },
+    });
+
+    const order = await orderRepo.create({
+      serviceDefinitionId: serviceId,
+      mode: 'semi_automatic',
+      requesterActorId: requesterId,
+      amountCents: 4_000,
+      currency: 'EUR',
+    });
+
+    const engine = new OrderEngine({
+      payment: async ({ order: lockedOrder, actorId, tx }) => {
+        await walletRepo.reserveWithinTransaction(tx as any, {
+          reservationId: randomUUID(),
+          transactionId: randomUUID(),
+          walletId: wallet.id,
+          currency: lockedOrder.monetaryIntent!.currency,
+          amountCents: lockedOrder.monetaryIntent!.amountCents,
+          actorId,
+          transactionKey: `order:${lockedOrder.id}:payment`,
+          relatedEntityType: 'order',
+          relatedEntityId: lockedOrder.id,
+          metadata: { orderId: lockedOrder.id, step: 'payment' },
+        });
+      },
+    }, orderRepo);
+
+    const validated = await engine.advance({
+      order,
+      actorId: requesterId,
+      toStep: 'validation',
+    });
+
+    await assert.rejects(
+      () => engine.advance({
+        order: validated,
+        actorId: requesterId,
+        toStep: 'payment',
+      }),
+      /Wallet is not active/,
+    );
+
+    const persisted = await orderRepo.getById(order.id);
+    assert.equal(persisted?.currentStep, 'validation');
+
+    const state = await walletRepo.getWalletById(wallet.id);
+    assert.equal(state?.balances[0]?.availableCents, 10_000);
+    assert.equal(state?.balances[0]?.reservedCents, 0);
+
+    const reservationCount = await client.walletTransaction.count({
+      where: { walletId: wallet.id, type: 'RESERVATION_HOLD' },
+    });
+    assert.equal(reservationCount, 0);
+  } finally {
+    await client.$disconnect();
+  }
+});

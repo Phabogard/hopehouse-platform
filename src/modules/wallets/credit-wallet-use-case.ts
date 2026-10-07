@@ -124,6 +124,20 @@ function validateAmount(amountCents: number): void {
   }
 }
 
+function assertReplayMatchesCommand(
+  transaction: WalletTransactionDto,
+  command: CreditWalletCommand,
+): void {
+  const currencyMatches = transaction.currency === command.currency.toUpperCase();
+  const amountMatches = transaction.amountCents === command.amountCents;
+  const typeMatches = transaction.type === 'CREDIT';
+  const transactionKeyMatches = (transaction.transactionKey ?? null) === (command.transactionKey ?? null);
+
+  if (!typeMatches || transaction.walletId !== command.walletId || !amountMatches || !currencyMatches || !transactionKeyMatches) {
+    throw new TransactionKeyConflictError(command.walletId, command.transactionKey ?? command.idempotencyKey);
+  }
+}
+
 export class CreditWalletUseCase {
   constructor(private readonly deps: CreditWalletDependencies) {}
 
@@ -137,7 +151,10 @@ export class CreditWalletUseCase {
     const existingRecord = await this.deps.idempotencyStore.find(command.idempotencyKey, operation);
     if (existingRecord?.resultReference) {
       const existingTransaction = await this.deps.walletRepository.getTransactionById(existingRecord.resultReference);
-      if (existingTransaction) return { transaction: existingTransaction, replayed: true };
+      if (existingTransaction) {
+        assertReplayMatchesCommand(existingTransaction, command);
+        return { transaction: existingTransaction, replayed: true };
+      }
     }
 
     try {
@@ -175,7 +192,10 @@ export class CreditWalletUseCase {
       const existing = await idempotencyStore.find(command.idempotencyKey, operation);
       if (existing?.resultReference) {
         const existingTransaction = await this.deps.walletRepository.getTransactionById(existing.resultReference);
-        if (existingTransaction) return { transaction: existingTransaction, replayed: true };
+        if (existingTransaction) {
+          assertReplayMatchesCommand(existingTransaction, command);
+          return { transaction: existingTransaction, replayed: true };
+        }
       }
       throw new Error(
         `IdempotencyRecord conflict for key=${command.idempotencyKey} operation=${operation} but no retrievable prior result was found`,

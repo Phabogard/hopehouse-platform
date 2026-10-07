@@ -24,6 +24,8 @@ Le moteur définit `Wallet`, `WalletBalance`, `WalletTransaction` et `WalletRese
 
 Les opérations disponibles sont crédit, débit, réservation, libération, capture, rollback, vérification du solde et vérification des fonds disponibles. Chaque opération financière exige un acteur, un montant strictement positif, une devise fournie par configuration, des métadonnées optionnelles et peut recevoir une clé de transaction idempotente.
 
+Une clé de transaction idempotente est liée à l'opération financière complète dans son wallet : un rejeu n'est accepté que si le type, le montant et la devise correspondent à la transaction déjà persistée. Pour une libération ou une capture, la clé est également liée à la réservation concernée ; une même clé ne peut pas rejouer une autre réservation ni changer de type d'opération.
+
 ### Devises configurables
 
 Le moteur ne contient aucune liste de devises autorisées. Il normalise uniquement le code devise à trois caractères. L'activation, la précision, les limites et les règles par devise devront provenir des catalogues configurables.
