@@ -812,3 +812,158 @@ test('10. P2002 strict classification: TEST D — missing target propagates erro
     }
   );
 });
+
+test('reserve() idempotency scenarios A-E', async () => {
+  const prisma = createMockPrismaClient();
+  const repo = new PrismaWalletRepository(prisma);
+
+  await repo.createWallet({ id: 'reserve-idem-w1', ownerType: 'USER', ownerId: 'u1' });
+  await repo.createWallet({ id: 'reserve-idem-w2', ownerType: 'USER', ownerId: 'u2' });
+
+  await repo.credit({
+    transactionId: 'reserve-idem-fund-1',
+    walletId: 'reserve-idem-w1',
+    currency: 'EUR',
+    amountCents: 50000,
+    actorId: 'system',
+  });
+  await repo.credit({
+    transactionId: 'reserve-idem-fund-2',
+    walletId: 'reserve-idem-w2',
+    currency: 'EUR',
+    amountCents: 50000,
+    actorId: 'system',
+  });
+
+  // A — identical replay is idempotent.
+  const first = await repo.reserve({
+    reservationId: 'reserve-idem-a-1',
+    transactionId: 'reserve-idem-a-tx-1',
+    walletId: 'reserve-idem-w1',
+    currency: 'EUR',
+    amountCents: 10000,
+    actorId: 'system',
+    transactionKey: 'reserve-idem-a',
+  });
+  const replay = await repo.reserve({
+    reservationId: 'reserve-idem-a-2',
+    transactionId: 'reserve-idem-a-tx-2',
+    walletId: 'reserve-idem-w1',
+    currency: 'EUR',
+    amountCents: 10000,
+    actorId: 'system',
+    transactionKey: 'reserve-idem-a',
+  });
+
+  assert.equal(replay.transaction.id, first.transaction.id);
+  assert.equal(replay.reservation.id, first.reservation.id);
+
+  // B — the same key with a different amount is a conflict.
+  await assert.rejects(
+    () => repo.reserve({
+      reservationId: 'reserve-idem-b',
+      transactionId: 'reserve-idem-b-tx',
+      walletId: 'reserve-idem-w1',
+      currency: 'EUR',
+      amountCents: 5000,
+      actorId: 'system',
+      transactionKey: 'reserve-idem-a',
+    }),
+    (err: any) => err.code === 'WALLET_CONFLICT',
+  );
+
+  // C — the same key with a different currency is a conflict.
+  await assert.rejects(
+    () => repo.reserve({
+      reservationId: 'reserve-idem-c',
+      transactionId: 'reserve-idem-c-tx',
+      walletId: 'reserve-idem-w1',
+      currency: 'USD',
+      amountCents: 10000,
+      actorId: 'system',
+      transactionKey: 'reserve-idem-a',
+    }),
+    (err: any) => err.code === 'WALLET_CONFLICT',
+  );
+
+  // D — transactionKey is scoped to the wallet, so the same key is independent on W2.
+  const otherWallet = await repo.reserve({
+    reservationId: 'reserve-idem-d',
+    transactionId: 'reserve-idem-d-tx',
+    walletId: 'reserve-idem-w2',
+    currency: 'EUR',
+    amountCents: 10000,
+    actorId: 'system',
+    transactionKey: 'reserve-idem-a',
+  });
+  assert.equal(otherWallet.transaction.walletId, 'reserve-idem-w2');
+
+  // A conflicting replay on W2 must still be rejected.
+  await assert.rejects(
+    () => repo.reserve({
+      reservationId: 'reserve-idem-d-2',
+      transactionId: 'reserve-idem-d-tx-2',
+      walletId: 'reserve-idem-w2',
+      currency: 'EUR',
+      amountCents: 5000,
+      actorId: 'system',
+      transactionKey: 'reserve-idem-a',
+    }),
+    (err: any) => err.code === 'WALLET_CONFLICT',
+  );
+
+  // E — explicitly exercise the P2002 winner-recovery path.
+  const winner = await repo.reserve({
+    reservationId: 'reserve-idem-e-winner',
+    transactionId: 'reserve-idem-e-winner-tx',
+    walletId: 'reserve-idem-w1',
+    currency: 'EUR',
+    amountCents: 7000,
+    actorId: 'system',
+    transactionKey: 'reserve-idem-e',
+  });
+
+  let transactionLookupCount = 0;
+  const p2002Prisma = {
+    ...prisma,
+    walletTransaction: {
+      ...prisma.walletTransaction,
+      async findFirst(args: any) {
+        transactionLookupCount += 1;
+        if (transactionLookupCount === 1) return null;
+        return prisma.walletTransaction.findFirst(args);
+      },
+    },
+    $transaction: async () => {
+      const err: any = new Error('Unique constraint failed on transaction key');
+      err.code = 'P2002';
+      err.meta = { target: ['walletId', 'transactionKey'] };
+      throw err;
+    },
+  };
+
+  const p2002Repo = new PrismaWalletRepository(p2002Prisma as any);
+
+  await assert.rejects(
+    () => p2002Repo.reserve({
+      reservationId: 'reserve-idem-e-loser',
+      transactionId: 'reserve-idem-e-loser-tx',
+      walletId: 'reserve-idem-w1',
+      currency: 'EUR',
+      amountCents: 5000,
+      actorId: 'system',
+      transactionKey: 'reserve-idem-e',
+    }),
+    (err: any) => {
+      assert.equal(err.code, 'WALLET_CONFLICT');
+      assert.match(err.message, /does not match the requested wallet operation/);
+      return true;
+    },
+  );
+
+  const state = await repo.getWalletById('reserve-idem-w1');
+  const balance = state?.balances.find((item) => item.currency === 'EUR');
+  assert.equal(balance?.availableCents, 33000);
+  assert.equal(balance?.reservedCents, 17000);
+  assert.equal(winner.reservation.amountCents, 7000);
+});

@@ -505,8 +505,18 @@ export class PrismaWalletRepository {
             where: { walletId: params.walletId, createdByTransactionId: winnerTx.id },
           });
           if (reservation) {
+            const mapped = this.mapTransaction(winnerTx);
+            this.assertIdempotentTransaction(
+              mapped,
+              {
+                type: WalletTransactionType.RESERVATION_HOLD,
+                amountCents: params.amountCents,
+                currency: validateCurrency(params.currency),
+              },
+              params.transactionKey,
+            );
             return {
-              transaction: this.mapTransaction(winnerTx),
+              transaction: mapped,
               reservation: this.mapReservation(reservation),
             };
           }
