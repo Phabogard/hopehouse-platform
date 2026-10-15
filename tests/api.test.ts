@@ -503,3 +503,58 @@ test('notification device HTTP API requires authentication', async () => {
     assert.equal(body.error.code, 'UNAUTHORIZED');
   }, { authRuntime: authRuntimeForRole('client'), notificationDevices: registry });
 });
+
+
+test('order transition endpoint enforces RBAC before mutating the order', async () => {
+  async function exerciseRole(role: 'system_admin' | 'business_admin' | 'operations_agent' | 'finance_manager' | 'client' | 'accountant' | 'auditor') {
+    const authRuntime: NonNullable<Parameters<typeof createHopeHouseServer>[0]>['authRuntime'] = {
+      async login() {
+        return {
+          accessToken: 'role-test-token',
+          refreshToken: null,
+          requiresTwoFactor: false,
+          session: { id: 'role-test-session', userId: `user-${role}`, expiresAt: new Date(Date.now() + 60_000).toISOString(), idleExpiresAt: null },
+          challenge: null,
+        };
+      },
+      async authenticateAccessToken(token) {
+        assert.equal(token, 'role-test-token');
+        return { id: `user-${role}`, role, sessionId: 'role-test-session' };
+      },
+    };
+
+    await withServer(async (baseUrl) => {
+      const headers = { 'content-type': 'application/json', authorization: 'Bearer role-test-token' };
+      const createResponse = await fetch(`${baseUrl}/orders`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ serviceDefinitionId: 'svc-rbac-test', mode: 'manual' }),
+      });
+      assert.equal(createResponse.status, 201, `order creation for ${role}`);
+      const created = await createResponse.json() as { data: { id: string } };
+
+      const transitionResponse = await fetch(`${baseUrl}/orders/${created.data.id}/transitions`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ toStep: 'validation' }),
+      });
+      if (['system_admin', 'business_admin', 'operations_agent'].includes(role)) {
+        assert.equal(transitionResponse.status, 200, role);
+        const transitioned = await transitionResponse.json() as { data: { currentStep: string } };
+        assert.equal(transitioned.data.currentStep, 'validation', role);
+      } else {
+        assert.equal(transitionResponse.status, 403, role);
+        const unchangedResponse = await fetch(`${baseUrl}/orders/${created.data.id}/transitions`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ toStep: 'validation' }),
+        });
+        assert.equal(unchangedResponse.status, 403, `denied role remains blocked: ${role}`);
+      }
+    }, { authRuntime });
+  }
+
+  for (const role of ['system_admin', 'business_admin', 'operations_agent', 'finance_manager', 'client', 'accountant', 'auditor'] as const) {
+    await exerciseRole(role);
+  }
+});
