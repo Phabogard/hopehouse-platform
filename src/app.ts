@@ -355,6 +355,7 @@ export function createHopeHouseServer(options: HopeHouseServerOptions = {}) {
 
       if (request.method === 'POST' && url.pathname.match(/^\/orders\/[^/]+\/transitions$/) !== null) {
         const currentActor = requireAuthenticatedActor(actor);
+        authorize(currentActor, 'orders:transition');
         const orderId = url.pathname.split('/')[2];
         const existingOrder = orderRepository
           ? await orderRepository.getById(orderId)
