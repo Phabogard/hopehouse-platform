@@ -31,6 +31,10 @@ Une commande référence uniquement une configuration de service (`serviceDefini
 
 Le service `OrderEngine` orchestre la création et l'avancement séquentiel. Il accepte des handlers optionnels par étape pour que les futurs modules configurables réalisent validation, paiement wallet, exécution, notification, reçu, historique et audit sans modifier la logique du moteur. Si un handler échoue, la transition n'est pas enregistrée.
 
+### Autorisation des transitions HTTP
+
+Toute transition demandée via `POST /orders/:id/transitions` doit être autorisée côté serveur par la permission `orders:transition`, après authentification et avant lecture/modification de la commande. Dans la matrice technique actuelle, cette permission est accordée à `system_admin`, `business_admin` et `operations_agent`; elle est refusée à `finance_manager`, `client`, `accountant` et `auditor`. La validation du cycle par `OrderEngine` reste obligatoire et ne remplace jamais l'autorisation RBAC. Cette permission constitue un contrôle global d'accès : avant d'exposer des transitions sensibles en production, les règles de périmètre de commande (propriétaire, affectation et tenant) ainsi que les autorisations par étape doivent également être définies et testées.
+
 ### Limites volontaires de cette étape
 
 Le paiement est un état orchestrable du cycle. Depuis l'étape Wallet Engine, un handler `payment` peut appeler le Wallet pour réserver ou débiter des fonds sans modifier le moteur de commandes. La notification et le reçu restent uniquement des états orchestrables. La persistance PostgreSQL reste documentaire dans `database/schema.sql` et sera connectée lors d'une étape dédiée.
